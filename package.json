@@ -1,0 +1,43 @@
+{
+  "name": "n8n-nodes-guardspine",
+  "version": "0.1.0",
+  "description": "n8n nodes for GuardSpine governance layer",
+  "license": "MIT",
+  "author": "David Youssef",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint . --ext .ts",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/GuardSpineApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/GuardGate/GuardGate.node.js",
+      "dist/nodes/CodeGuard/CodeGuard.node.js",
+      "dist/nodes/BeadsCreate/BeadsCreate.node.js",
+      "dist/nodes/ApprovalWait/ApprovalWait.node.js",
+      "dist/nodes/BeadsUpdate/BeadsUpdate.node.js",
+      "dist/nodes/EvidenceSeal/EvidenceSeal.node.js",
+      "dist/nodes/CouncilVote/CouncilVote.node.js"
+    ]
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": ">=1.0.0"
+  }
+}
