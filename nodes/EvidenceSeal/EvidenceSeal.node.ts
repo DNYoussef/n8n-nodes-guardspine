@@ -6,6 +6,8 @@ import {
   NodeOperationError,
 } from 'n8n-workflow';
 
+import type { EvidenceSealResponse } from '../types';
+
 export class EvidenceSeal implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Evidence Seal',
@@ -76,7 +78,7 @@ export class EvidenceSeal implements INodeType {
       const previousChainHash = this.getNodeParameter('previousChainHash', i) as string;
       const metadataRaw = this.getNodeParameter('metadata', i);
 
-      const body: Record<string, any> = {
+      const body: Record<string, unknown> = {
         diff_hash: diffHash,
         approver_id: approverId,
         policy_ref: policyRef,
@@ -87,11 +89,14 @@ export class EvidenceSeal implements INodeType {
       }
 
       if (metadataRaw) {
-        body.metadata =
-          typeof metadataRaw === 'string' ? JSON.parse(metadataRaw) : metadataRaw;
+        try {
+          body.metadata = typeof metadataRaw === 'string' ? JSON.parse(metadataRaw) : metadataRaw;
+        } catch {
+          throw new NodeOperationError(this.getNode(), 'Invalid JSON in Metadata', { itemIndex: i });
+        }
       }
 
-      let response: any;
+      let response: EvidenceSealResponse;
       try {
         response = await this.helpers.httpRequest({
           method: 'POST',
@@ -102,6 +107,7 @@ export class EvidenceSeal implements INodeType {
           },
           body,
           returnFullResponse: false,
+          timeout: 15000,
         });
       } catch (error: any) {
         throw new NodeOperationError(

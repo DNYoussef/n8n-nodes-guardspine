@@ -1,0 +1,160 @@
+{
+  "name": "Guard Lane Evaluation - 11 Lanes with Escalation",
+  "description": "Receives an artifact + guard lane type, evaluates risk tier (L0-L4), applies payload-based dynamic escalation, routes to approval or council vote as needed. Covers all 11 lanes: CommsGuard, TicketGuard, DealGuard, ContractGuard, DeployGuard (Operational), CodeGuard, PdfGuard, SheetGuard, ImageGuard (Artifact), DataGuard, PolicyGuard (Governance).",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "guard-lane-evaluate",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Guard Lane Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst lane = body.guard_lane || 'comms';\nconst action = body.action_type || 'generic';\nconst payload = body.payload || {};\n\n// Static risk tier rules per lane (11 lanes)\nconst LANE_RULES = {\n  // Operational Lanes\n  comms: {\n    internal_reply: 0, bulk_announcement: 2, external_press: 3,\n    partner_nda_share: 4, customer_escalation: 2\n  },\n  ticket: {\n    status_update: 0, priority_change: 1, sla_override: 2,\n    data_access_request: 3, account_deletion: 4\n  },\n  deal: {\n    update_notes: 0, discount_under_10: 1, discount_over_10: 2,\n    custom_terms: 3, deal_over_500k: 4\n  },\n  contract: {\n    view_template: 0, minor_edit: 1, clause_modification: 2,\n    new_msa: 3, dpa_modification: 4\n  },\n  deploy: {\n    staging_deploy: 0, canary_release: 1, production_deploy: 2,\n    rollback: 2, hotfix_production: 3, infrastructure_change: 4\n  },\n  // Artifact Lanes\n  code: {\n    code_change: 1, dependency_update: 2, security_patch: 2,\n    ci_config_change: 3, breaking_api_change: 4\n  },\n  pdf: {\n    document_reflow: 1, appendix_modification: 1, clause_change: 2,\n    liability_shift: 3, regulatory_filing: 4\n  },\n  sheet: {\n    range_modification: 1, vlookup_swap: 2, formula_change: 2,\n    macro_change: 3, revenue_model_change: 4\n  },\n  image: {\n    pixel_diff: 1, ui_anomaly: 2, brand_asset_change: 2,\n    external_link_injection: 3, customer_slide_deck: 3\n  },\n  // Governance Lanes\n  data: {\n    gdpr_request: 2, pii_access: 3, data_export: 3,\n    bulk_delete: 4, cross_border_transfer: 4\n  },\n  policy: {\n    threshold_update: 2, lane_config_change: 3, rubric_change: 3,\n    persona_assignment_change: 3, remove_guard: 4\n  }\n};\n\nlet baseTier = LANE_RULES[lane]?.[action] ?? 1;\n\n// Payload-based dynamic escalation\nif (lane === 'comms') {\n  if (payload.mentions_everyone) baseTier = Math.max(baseTier, 2);\n  if (payload.contains_pii) baseTier = Math.max(baseTier, 3);\n  if (payload.external_recipients > 50) baseTier = Math.max(baseTier, 3);\n}\nif (lane === 'deal') {\n  if (payload.deal_value > 500000) baseTier = Math.max(baseTier, 4);\n  if (payload.deal_value > 100000) baseTier = Math.max(baseTier, 3);\n  if (payload.custom_sla) baseTier = Math.max(baseTier, 2);\n}\nif (lane === 'contract') {\n  if (payload.affects_data_processing) baseTier = Math.max(baseTier, 3);\n  if (payload.jurisdiction_change) baseTier = Math.max(baseTier, 4);\n}\nif (lane === 'deploy') {\n  if (payload.affects_auth) baseTier = Math.max(baseTier, 3);\n  if (payload.database_migration) baseTier = Math.max(baseTier, 3);\n  if (payload.breaking_change) baseTier = Math.max(baseTier, 4);\n}\nif (lane === 'code') {\n  if (payload.affects_auth) baseTier = Math.max(baseTier, 3);\n  if (payload.sarif_critical_count > 0) baseTier = Math.max(baseTier, 3);\n  if (payload.breaking_change) baseTier = Math.max(baseTier, 4);\n}\nif (lane === 'pdf') {\n  if (payload.board_document) baseTier = Math.max(baseTier, 4);\n  if (payload.affects_liability) baseTier = Math.max(baseTier, 3);\n}\nif (lane === 'sheet') {\n  if (payload.formula_count > 10) baseTier = Math.max(baseTier, 3);\n  if (payload.board_packet) baseTier = Math.max(baseTier, 4);\n  if (payload.revenue_model) baseTier = Math.max(baseTier, 3);\n}\nif (lane === 'image') {\n  if (payload.external_api_detected) baseTier = Math.max(baseTier, 3);\n  if (payload.customer_facing) baseTier = Math.max(baseTier, 2);\n}\nif (lane === 'data') {\n  if (payload.record_count > 1000) baseTier = Math.max(baseTier, 3);\n  if (payload.contains_pii) baseTier = Math.max(baseTier, 3);\n  if (payload.cross_border) baseTier = Math.max(baseTier, 4);\n}\nif (lane === 'policy') {\n  baseTier = Math.max(baseTier, 2);\n  if (payload.affects_multiple_lanes) baseTier = Math.max(baseTier, 4);\n  if (payload.removes_guard) baseTier = Math.max(baseTier, 4);\n}\n\n// Build evidence bundle\nconst crypto = require('crypto');\nconst evidenceHash = crypto.createHash('sha256')\n  .update(JSON.stringify({ lane, action, payload, tier: baseTier, ts: Date.now() }))\n  .digest('hex');\n\nreturn [{\n  json: {\n    guard_lane: lane,\n    action_type: action,\n    risk_tier: baseTier,\n    risk_label: ['L0-Auto', 'L1-Audit', 'L2-Approve', 'L3-MultiApprove', 'L4-Council'][baseTier],\n    payload,\n    evidence_hash: evidenceHash,\n    requires_approval: baseTier >= 2,\n    requires_council: baseTier >= 4,\n    approval_requirements: baseTier >= 2 ? {\n      approvers_needed: baseTier === 2 ? 1 : baseTier === 3 ? 2 : 3,\n      timeout_hours: baseTier === 2 ? 24 : baseTier === 3 ? 48 : 72,\n      roles: baseTier === 2 ? ['admin', 'manager'] : baseTier === 3 ? ['admin', 'senior', 'security'] : ['admin', 'exec', 'security', 'legal']\n    } : null,\n    evaluated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "risk-eval",
+      "name": "Risk Tier Evaluation + Escalation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [350, 400]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "output": 0, "value": 0, "operation": "lte" },
+            { "output": 1, "value": 1 },
+            { "output": 2, "value": 3, "operation": "lte" },
+            { "output": 3, "value": 4 }
+          ]
+        },
+        "fallbackOutput": 2,
+        "dataType": "number",
+        "value1": "={{ $json.risk_tier }}"
+      },
+      "id": "tier-switch",
+      "name": "Route by Risk Tier",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [600, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// L0: Auto-approve, log only\nconst item = $input.first().json;\nreturn [{\n  json: {\n    ...item,\n    decision: 'auto_approved',\n    decided_by: 'system',\n    reason: 'L0 autonomous - no approval required'\n  }\n}];"
+      },
+      "id": "l0-auto",
+      "name": "L0 Auto-Approve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// L1: Audit log only, no blocking\nconst item = $input.first().json;\nreturn [{\n  json: {\n    ...item,\n    decision: 'logged',\n    decided_by: 'system',\n    reason: 'L1 audit - logged for compliance review'\n  }\n}];"
+      },
+      "id": "l1-audit",
+      "name": "L1 Audit Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 350]
+    },
+    {
+      "parameters": {
+        "diffData": "={{ JSON.stringify($json.payload) }}",
+        "riskTier": "={{ $json.risk_tier }}",
+        "guardType": "generic",
+        "timeoutMinutes": "={{ $json.risk_tier === 2 ? 1440 : 2880 }}",
+        "evidenceHash": "={{ $json.evidence_hash }}"
+      },
+      "id": "l2-l3-approval",
+      "name": "L2/L3 Human Approval",
+      "type": "n8n-nodes-guardspine.approvalWait",
+      "typeVersion": 1,
+      "position": [900, 500],
+      "credentials": { "guardSpineApi": "GuardSpine API" }
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $env.COUNCIL_VOTE_WORKFLOW_ID }}",
+        "workflowInputs": {
+          "values": [
+            { "name": "question", "value": "={{ 'Evaluate ' + $json.guard_lane + ' action: ' + $json.action_type }}" },
+            { "name": "artifact_data", "value": "={{ JSON.stringify($json.payload) }}" },
+            { "name": "evidence_hash", "value": "={{ $json.evidence_hash }}" }
+          ]
+        }
+      },
+      "id": "l4-council",
+      "name": "L4 Council Vote (Sub-Workflow)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 650]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nreturn [{ json: item }];"
+      },
+      "id": "merge-output",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1450, 400]
+    }
+  ],
+  "connections": {
+    "Webhook - Guard Lane Request": {
+      "main": [[{ "node": "Risk Tier Evaluation + Escalation", "type": "main", "index": 0 }]]
+    },
+    "Risk Tier Evaluation + Escalation": {
+      "main": [[{ "node": "Route by Risk Tier", "type": "main", "index": 0 }]]
+    },
+    "Route by Risk Tier": {
+      "main": [
+        [{ "node": "L0 Auto-Approve", "type": "main", "index": 0 }],
+        [{ "node": "L1 Audit Log", "type": "main", "index": 0 }],
+        [{ "node": "L2/L3 Human Approval", "type": "main", "index": 0 }],
+        [{ "node": "L4 Council Vote (Sub-Workflow)", "type": "main", "index": 0 }]
+      ]
+    },
+    "L0 Auto-Approve": {
+      "main": [[{ "node": "Merge Results", "type": "main", "index": 0 }]]
+    },
+    "L1 Audit Log": {
+      "main": [[{ "node": "Merge Results", "type": "main", "index": 0 }]]
+    },
+    "L2/L3 Human Approval": {
+      "main": [
+        [{ "node": "Merge Results", "type": "main", "index": 0 }],
+        [{ "node": "Merge Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "L4 Council Vote (Sub-Workflow)": {
+      "main": [[{ "node": "Merge Results", "type": "main", "index": 0 }]]
+    },
+    "Merge Results": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "instanceId": "n8n-guardspine-guard-lane-v1",
+    "tags": ["guard-lane", "risk-tier", "escalation", "L0-L4", "governance"]
+  }
+}

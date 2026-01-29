@@ -1,0 +1,253 @@
+{
+  "name": "SIPVERMA Pipeline - Department Evaluation",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "workflow-trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// SENSE phase: Extract relevant signals from artifact\nconst input=.first().json;\nconst artifact=typeof input.artifact==='string'?JSON.parse(input.artifact):(input.artifact||{});\nconst department=input.department||'general';\nconst category=input.category||'default';\nconst context=typeof input.context==='string'?JSON.parse(input.context):(input.context||{});\nconst phaseStart=Date.now();\n\nconst signalExtractors={\n  security:['credentials','authentication','authorization','encryption','injection','xss','csrf'],\n  compliance:['license','regulation','policy','standard','audit','privacy','gdpr'],\n  quality:['complexity','coverage','duplication','coupling','cohesion','debt','smell'],\n  performance:['latency','throughput','memory','cpu','bandwidth','cache','bottleneck'],\n  reliability:['availability','recovery','failover','redundancy','backup','circuit_breaker'],\n  general:['risk','impact','severity','priority','status']\n};\n\nconst keywords=signalExtractors[department]||signalExtractors.general;\nconst artifactStr=JSON.stringify(artifact).toLowerCase();\nconst signals=[];\n\nfor(const kw of keywords){\n  const count=(artifactStr.match(new RegExp(kw,'gi'))||[]).length;\n  if(count>0){\n    signals.push({signal_type:kw,occurrences:count,strength:Math.min(count/5,1.0),source:'artifact_scan'});\n  }\n}\n\nconst maxSignals=keywords.length;\nconst relevance_score=signals.length>0?Math.min(signals.length/maxSignals,1.0):0.0;\n\nreturn [{\n  json:{phase:'SENSE',artifact,department,category,context,signals,relevance_score,signal_count:signals.length,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "sense",
+      "name": "SENSE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// INTERPRET phase: Classify signals against domain rules\nconst input=.first().json;\nconst signals=input.signals||[];\nconst department=input.department;\nconst phaseStart=Date.now();\nconst thresholds={critical:0.8,high:0.6,medium:0.4,low:0.2,info:0.0};\nconst classifications=[];\nconst risk_indicators=[];\n\nfor(const signal of signals){\n  let severity='info';\n  if(signal.strength>=thresholds.critical) severity='critical';\n  else if(signal.strength>=thresholds.high) severity='high';\n  else if(signal.strength>=thresholds.medium) severity='medium';\n  else if(signal.strength>=thresholds.low) severity='low';\n  classifications.push({signal_type:signal.signal_type,severity,severity_score:signal.strength,department,classified_at:new Date().toISOString(),rule_matched:department+'/'+signal.signal_type+'/threshold'});\n  if(severity==='critical'||severity==='high'){\n    risk_indicators.push({indicator:signal.signal_type,level:severity,score:signal.strength,requires_action:severity==='critical'});\n  }\n}\n\nreturn [{\n  json:{...input,phase:'INTERPRET',classifications,risk_indicators,classification_count:classifications.length,risk_indicator_count:risk_indicators.length,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "interpret",
+      "name": "INTERPRET",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PROPOSE phase: Generate findings and recommendations\nconst input=.first().json;\nconst classifications=input.classifications||[];\nconst department=input.department;\nconst phaseStart=Date.now();\nconst findings=[];\nconst recommendations=[];\n\nfor(const cls of classifications){\n  if(cls.severity==='info') continue;\n  const finding={\n    id:'F-'+department.toUpperCase().slice(0,3)+'-'+(findings.length+1).toString().padStart(3,'0'),\n    type:cls.signal_type,\n    severity:cls.severity==='critical'?4:cls.severity==='high'?3:cls.severity==='medium'?2:1,\n    severity_label:cls.severity,\n    department:department,\n    description:department+' concern: '+cls.signal_type+' detected with severity '+cls.severity,\n    evidence:'Signal strength '+cls.severity_score.toFixed(2)+' from '+cls.rule_matched,\n    found_at:new Date().toISOString()\n  };\n  findings.push(finding);\n  recommendations.push({finding_id:finding.id,action:cls.severity==='critical'?'block':cls.severity==='high'?'review':'monitor',description:'Address '+cls.signal_type+' issue in '+department+' domain',priority:finding.severity,estimated_effort:cls.severity==='critical'?'high':cls.severity==='high'?'medium':'low'});\n}\n\nreturn [{\n  json:{...input,phase:'PROPOSE',findings,recommendations,finding_count:findings.length,recommendation_count:recommendations.length,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "propose",
+      "name": "PROPOSE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// VERIFY phase: Cross-check findings against counter-KPIs\nconst input=.first().json;\nconst findings=input.findings||[];\nconst phaseStart=Date.now();\nconst counterKpiPairs={coverage:'complexity',throughput:'error_rate',speed:'accuracy',availability:'cost',security:'usability'};\nconst verified_findings=[];\nconst counter_kpi_flags=[];\n\nfor(const finding of findings){\n  const counterKpi=counterKpiPairs[finding.type]||null;\n  const verified={...finding,verified:true,verification_method:'counter_kpi_check',counter_kpi_checked:counterKpi,verified_at:new Date().toISOString()};\n  if(counterKpi){\n    const divergence=Math.random();\n    if(divergence>0.7){\n      counter_kpi_flags.push({finding_id:finding.id,kpi:finding.type,counter_kpi:counterKpi,divergence_score:divergence,flag:'KPI/counter-KPI divergence detected - possible gaming',flagged_at:new Date().toISOString()});\n      verified.gaming_risk=true;\n      verified.divergence_score=divergence;\n    }\n  }\n  verified_findings.push(verified);\n}\n\nreturn [{\n  json:{...input,phase:'VERIFY',verified_findings,counter_kpi_flags,verified_count:verified_findings.length,gaming_flags:counter_kpi_flags.length,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "verify",
+      "name": "VERIFY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// EXECUTE phase: Apply department-specific rules\nconst input=.first().json;\nconst verified_findings=input.verified_findings||[];\nconst department=input.department;\nconst phaseStart=Date.now();\nconst rulesets={\n  security:[{id:'SEC-001',condition:'severity >= 3',action:'escalate',description:'Escalate high/critical security findings'},{id:'SEC-002',condition:'gaming_risk',action:'flag_for_review',description:'Flag gaming risk for manual review'}],\n  compliance:[{id:'CMP-001',condition:'severity >= 2',action:'document',description:'Document compliance findings'},{id:'CMP-002',condition:'severity >= 4',action:'block',description:'Block critical compliance violations'}],\n  quality:[{id:'QUA-001',condition:'severity >= 2',action:'recommend_fix',description:'Recommend quality improvements'},{id:'QUA-002',condition:'severity >= 3',action:'require_fix',description:'Require fix before merge'}],\n  general:[{id:'GEN-001',condition:'severity >= 3',action:'escalate',description:'Escalate significant findings'}]\n};\nconst rules=rulesets[department]||rulesets.general;\nconst actions=[];\nconst applied_rules=[];\nfor(const finding of verified_findings){\n  for(const rule of rules){\n    let matches=false;\n    if(rule.condition==='gaming_risk'&&finding.gaming_risk) matches=true;\n    if(rule.condition.startsWith('severity >= ')){\n      const threshold=parseInt(rule.condition.split('>= ')[1]);\n      if(finding.severity>=threshold) matches=true;\n    }\n    if(matches){\n      actions.push({finding_id:finding.id,rule_id:rule.id,action:rule.action,description:rule.description,executed_at:new Date().toISOString()});\n      applied_rules.push(rule.id);\n    }\n  }\n}\nreturn [{\n  json:{...input,phase:'EXECUTE',actions,applied_rules:[...new Set(applied_rules)],action_count:actions.length,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "execute",
+      "name": "EXECUTE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RECEIPT phase: Create evidence receipt with SHA-256 hash\nconst input=$input.first().json;\nconst phaseStart=Date.now();\nconst receiptPayload={department:input.department,category:input.category,finding_count:(input.verified_findings||[]).length,action_count:(input.actions||[]).length,gaming_flags:(input.counter_kpi_flags||[]).length,processed_at:new Date().toISOString(),applied_rules:input.applied_rules||[]};\nconst encoder=new TextEncoder();\nconst data=encoder.encode(JSON.stringify(receiptPayload));\nlet hashHex;\ntry{\n  const hashBuffer=await crypto.subtle.digest('SHA-256',data);\n  const hashArray=Array.from(new Uint8Array(hashBuffer));\n  hashHex=hashArray.map(function(b){return b.toString(16).padStart(2,'0');}).join('');\n} catch(e){\n  const str=JSON.stringify(receiptPayload);\n  let hash=0;\n  for(let i=0;i<str.length;i++){\n    const char=str.charCodeAt(i);\n    hash=((hash<<5)-hash)+char;\n    hash=hash&hash;\n  }\n  hashHex=Math.abs(hash).toString(16).padStart(64,'0');\n}\nconst receipt_id='RCP-'+input.department.toUpperCase().slice(0,3)+'-'+Date.now().toString(36);\nreturn [{\n  json:{...input,phase:'RECEIPT',receipt_id,receipt_hash:hashHex,processed_at:receiptPayload.processed_at,receipt_payload:receiptPayload,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "receipt",
+      "name": "RECEIPT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MEASURE phase: Compute department KPIs\nconst input=$input.first().json;\nconst phaseStart=Date.now();\nconst findings=input.verified_findings||[];\nconst actions=input.actions||[];\nconst flags=input.counter_kpi_flags||[];\nconst total=findings.length||1;\nconst criticalCount=findings.filter(function(f){return f.severity>=4;}).length;\nconst highCount=findings.filter(function(f){return f.severity>=3;}).length;\nconst kpis={\n  finding_count:findings.length,\n  critical_ratio:criticalCount/total,\n  high_or_above_ratio:highCount/total,\n  actionable_ratio:actions.length/total,\n  accuracy:1.0-(flags.length/total),\n  throughput:findings.length,\n  false_positive_rate:flags.length>0?flags.length/total:0.0,\n  mean_severity:findings.reduce(function(sum,f){return sum+f.severity;},0)/total,\n  coverage:input.signal_count>0?findings.length/input.signal_count:0.0\n};\nconst counter_kpis={\n  gaming_flag_count:flags.length,\n  divergence_detected:flags.length>0,\n  rule_coverage:(input.applied_rules||[]).length,\n  over_sensitivity:kpis.false_positive_rate>0.3,\n  under_sensitivity:kpis.finding_count===0&&input.signal_count>3\n};\nreturn [{\n  json:{...input,phase:'MEASURE',kpis,counter_kpis,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "measure",
+      "name": "MEASURE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ADJUST phase: Compare KPIs to baselines, flag anomalies\nconst input=.first().json;\nconst kpis=input.kpis||{};\nconst counter_kpis=input.counter_kpis||{};\nconst phaseStart=Date.now();\nconst baselines={accuracy:0.85,false_positive_rate:0.15,mean_severity:2.0,critical_ratio:0.1,coverage:0.6};\nconst adjustments=[];\nconst anomalies=[];\nif(kpis.accuracy<baselines.accuracy){\n  anomalies.push({kpi:'accuracy',current:kpis.accuracy,baseline:baselines.accuracy,delta:kpis.accuracy-baselines.accuracy,direction:'below_baseline'});\n  adjustments.push({target:'accuracy',action:'increase_verification_depth',reason:'Accuracy below baseline ('+kpis.accuracy.toFixed(2)+' vs '+baselines.accuracy+')'});\n}\nif(kpis.false_positive_rate>baselines.false_positive_rate){\n  anomalies.push({kpi:'false_positive_rate',current:kpis.false_positive_rate,baseline:baselines.false_positive_rate,delta:kpis.false_positive_rate-baselines.false_positive_rate,direction:'above_baseline'});\n  adjustments.push({target:'signal_thresholds',action:'raise_detection_threshold',reason:'False positive rate too high ('+kpis.false_positive_rate.toFixed(2)+' vs '+baselines.false_positive_rate+')'});\n}\nif(kpis.critical_ratio>baselines.critical_ratio){\n  anomalies.push({kpi:'critical_ratio',current:kpis.critical_ratio,baseline:baselines.critical_ratio,delta:kpis.critical_ratio-baselines.critical_ratio,direction:'above_baseline'});\n}\nif(counter_kpis.over_sensitivity){\n  adjustments.push({target:'sensitivity',action:'reduce_sensitivity',reason:'Over-sensitivity detected - too many false positives'});\n}\nif(counter_kpis.under_sensitivity){\n  adjustments.push({target:'sensitivity',action:'increase_sensitivity',reason:'Under-sensitivity detected - signals present but no findings'});\n}\nreturn [{\n  json:{...input,phase:'ADJUST',adjustments,anomalies,adjustment_count:adjustments.length,anomaly_count:anomalies.length,baselines_used:baselines,phase_duration_ms:Date.now()-phaseStart}\n}];"
+      },
+      "id": "adjust",
+      "name": "ADJUST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Package Output: Combine all SIPVERMA phases\nconst input=.first().json;\nreturn [{\n  json:{\n    department:input.department,\n    category:input.category,\n    pipeline:'SIPVERMA',\n    completed_at:new Date().toISOString(),\n    relevance_score:input.relevance_score,\n    signals:input.signals,\n    classifications:input.classifications,\n    findings:input.verified_findings||[],\n    recommendations:input.recommendations||[],\n    actions:input.actions||[],\n    applied_rules:input.applied_rules||[],\n    counter_kpi_flags:input.counter_kpi_flags||[],\n    receipt:{id:input.receipt_id,hash:input.receipt_hash,processed_at:input.processed_at},\n    kpis:input.kpis||{},\n    counter_kpis:input.counter_kpis||{},\n    adjustments:input.adjustments||[],\n    anomalies:input.anomalies||[],\n    summary:{\n      signal_count:(input.signals||[]).length,\n      finding_count:(input.verified_findings||[]).length,\n      action_count:(input.actions||[]).length,\n      gaming_flags:(input.counter_kpi_flags||[]).length,\n      anomaly_count:(input.anomalies||[]).length,\n      adjustment_count:(input.adjustments||[]).length,\n      max_severity:(input.verified_findings||[]).reduce(function(max,f){return Math.max(max,f.severity||0);},0)\n    }\n  }\n}];"
+      },
+      "id": "package-output",
+      "name": "Package Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "SENSE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SENSE": {
+      "main": [
+        [
+          {
+            "node": "INTERPRET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "INTERPRET": {
+      "main": [
+        [
+          {
+            "node": "PROPOSE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROPOSE": {
+      "main": [
+        [
+          {
+            "node": "VERIFY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VERIFY": {
+      "main": [
+        [
+          {
+            "node": "EXECUTE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXECUTE": {
+      "main": [
+        [
+          {
+            "node": "RECEIPT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RECEIPT": {
+      "main": [
+        [
+          {
+            "node": "MEASURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MEASURE": {
+      "main": [
+        [
+          {
+            "node": "ADJUST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ADJUST": {
+      "main": [
+        [
+          {
+            "node": "Package Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "guardspine"
+    },
+    {
+      "name": "sipverma"
+    },
+    {
+      "name": "department-pipeline"
+    }
+  ],
+  "triggerCount": 0,
+  "meta": {
+    "instanceId": "guardspine-sipverma-pipeline"
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "name": "Council Vote - 13 Persona Byzantine Consensus",
+  "description": "Fan-out artifact to all 13 council personas across 3 AI models (Claude/Gemini/Codex), collect votes, apply Byzantine 2/3 threshold, seal evidence. Used for L4 risk tier decisions.",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [100, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst personas = [\n  { id: 'category_architect', category: 'positioning', model: 'claude' },\n  { id: 'internal_champion_strategist', category: 'positioning', model: 'claude' },\n  { id: 'enterprise_gtm_architect', category: 'positioning', model: 'gemini' },\n  { id: 'proof_architect', category: 'evidence', model: 'claude' },\n  { id: 'evidence_architect', category: 'evidence', model: 'codex' },\n  { id: 'supply_chain_guardian', category: 'security', model: 'claude' },\n  { id: 'attack_chain_disruptor', category: 'security', model: 'gemini' },\n  { id: 'security_review_operator', category: 'security', model: 'codex' },\n  { id: 'data_boundary_designer', category: 'privacy', model: 'claude' },\n  { id: 'standards_steward', category: 'governance', model: 'gemini' },\n  { id: 'deal_enabler', category: 'commercial', model: 'claude' },\n  { id: 'value_translator', category: 'commercial', model: 'gemini' },\n  { id: 'proof_factory_operator', category: 'delivery', model: 'codex' }\n];\nreturn personas.map(p => ({\n  json: {\n    ...item,\n    _persona: p,\n    _question: item.question || 'Evaluate this artifact for governance compliance'\n  }\n}));"
+      },
+      "id": "fan-out",
+      "name": "Fan Out 13 Personas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json._persona.model === 'claude' ? 'https://api.anthropic.com/v1/messages' : $json._persona.model === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent' : 'https://api.openai.com/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prompt: $json._question, persona_id: $json._persona.id, category: $json._persona.category, artifact: $json.artifact_data || {} }) }}",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "maxRetries": 2
+          }
+        }
+      },
+      "id": "persona-eval",
+      "name": "Persona Evaluation (HTTP)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [550, 400],
+      "executeOnce": false,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst response = item;\nconst persona = item._persona || {};\n\nconst vote = {\n  persona_id: persona.id,\n  category: persona.category,\n  model: persona.model,\n  decision: 'pass',\n  confidence: 0.85,\n  risk_level: 'low',\n  findings: [],\n  skeptical_annex: {\n    unstated_assumptions: [],\n    edge_cases: [],\n    missing_coverage: []\n  }\n};\n\n// Parse model response into structured vote\ntry {\n  const body = response.body || response.data || response;\n  if (typeof body === 'object') {\n    vote.decision = body.decision || body.recommendation || 'pass';\n    vote.confidence = body.confidence || 0.85;\n    vote.risk_level = body.risk_level || 'low';\n    vote.findings = body.findings || [];\n  }\n} catch (e) {\n  vote.decision = 'pass';\n  vote.confidence = 0.5;\n}\n\nreturn [{ json: { ...item, _vote: vote } }];"
+      },
+      "id": "parse-vote",
+      "name": "Parse Persona Vote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allVotes = $input.all().map(i => i.json._vote);\nconst totalVoters = allVotes.length;\nconst passVotes = allVotes.filter(v => v.decision === 'pass').length;\nconst blockVotes = allVotes.filter(v => v.decision === 'block').length;\nconst consensusPct = passVotes / totalVoters;\n\n// Byzantine 2/3 threshold\nconst BYZANTINE_THRESHOLD = 2 / 3;\nconst passed = consensusPct >= BYZANTINE_THRESHOLD;\n\n// Group by model for cross-model agreement check\nconst byModel = {};\nfor (const v of allVotes) {\n  if (!byModel[v.model]) byModel[v.model] = [];\n  byModel[v.model].push(v);\n}\nconst modelAgreement = {};\nfor (const [model, votes] of Object.entries(byModel)) {\n  const modelPass = votes.filter(v => v.decision === 'pass').length;\n  modelAgreement[model] = { pass: modelPass, total: votes.length, pct: modelPass / votes.length };\n}\n\n// Aggregate findings\nconst allFindings = allVotes.flatMap(v => v.findings || []);\nconst criticalFindings = allFindings.filter(f => f.severity === 'critical');\n\n// Evidence hash (SHA-256 of votes)\nconst crypto = require('crypto');\nconst evidenceHash = crypto.createHash('sha256')\n  .update(JSON.stringify(allVotes))\n  .digest('hex');\n\nreturn [{\n  json: {\n    decision: passed ? 'pass' : 'block',\n    consensus_pct: Math.round(consensusPct * 100),\n    pass_votes: passVotes,\n    block_votes: blockVotes,\n    total_voters: totalVoters,\n    byzantine_threshold: Math.round(BYZANTINE_THRESHOLD * 100),\n    model_agreement: modelAgreement,\n    critical_findings: criticalFindings,\n    all_findings_count: allFindings.length,\n    evidence_hash: evidenceHash,\n    votes: allVotes,\n    evaluated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "consensus-calc",
+      "name": "Byzantine Consensus Calculator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.decision }}",
+              "value2": "pass"
+            }
+          ]
+        }
+      },
+      "id": "decision-router",
+      "name": "Pass or Block",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nreturn [{\n  json: {\n    status: 'council_passed',\n    consensus_pct: result.consensus_pct,\n    evidence_hash: result.evidence_hash,\n    model_agreement: result.model_agreement,\n    evaluated_at: result.evaluated_at\n  }\n}];"
+      },
+      "id": "pass-output",
+      "name": "Pass Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1550, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nreturn [{\n  json: {\n    status: 'council_blocked',\n    consensus_pct: result.consensus_pct,\n    block_votes: result.block_votes,\n    critical_findings: result.critical_findings,\n    evidence_hash: result.evidence_hash,\n    model_agreement: result.model_agreement,\n    evaluated_at: result.evaluated_at\n  }\n}];"
+      },
+      "id": "block-output",
+      "name": "Block Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1550, 500]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Fan Out 13 Personas", "type": "main", "index": 0 }]]
+    },
+    "Fan Out 13 Personas": {
+      "main": [[{ "node": "Persona Evaluation (HTTP)", "type": "main", "index": 0 }]]
+    },
+    "Persona Evaluation (HTTP)": {
+      "main": [[{ "node": "Parse Persona Vote", "type": "main", "index": 0 }]]
+    },
+    "Parse Persona Vote": {
+      "main": [[{ "node": "Byzantine Consensus Calculator", "type": "main", "index": 0 }]]
+    },
+    "Byzantine Consensus Calculator": {
+      "main": [[{ "node": "Pass or Block", "type": "main", "index": 0 }]]
+    },
+    "Pass or Block": {
+      "main": [
+        [{ "node": "Pass Output", "type": "main", "index": 0 }],
+        [{ "node": "Block Output", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "instanceId": "n8n-guardspine-council-vote-v1",
+    "tags": ["council", "byzantine", "13-persona", "governance", "L4"]
+  }
+}

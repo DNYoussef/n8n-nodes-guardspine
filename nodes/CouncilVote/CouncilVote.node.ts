@@ -6,6 +6,8 @@ import {
   NodeOperationError,
 } from 'n8n-workflow';
 
+import type { CouncilVoteResponse } from '../types';
+
 export class CouncilVote implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Council Vote',
@@ -72,14 +74,18 @@ export class CouncilVote implements INodeType {
       const votingMode = this.getNodeParameter('votingMode', i) as string;
       const personaIdsRaw = this.getNodeParameter('personaIds', i) as string;
 
-      const contextObj =
-        typeof contextRaw === 'string' ? JSON.parse(contextRaw) : contextRaw;
+      let contextObj: Record<string, unknown>;
+      try {
+        contextObj = typeof contextRaw === 'string' ? JSON.parse(contextRaw) : contextRaw;
+      } catch {
+        throw new NodeOperationError(this.getNode(), 'Invalid JSON in Context field', { itemIndex: i });
+      }
 
       const personaIds = personaIdsRaw
         ? personaIdsRaw.split(',').map((s: string) => s.trim()).filter(Boolean)
         : null;
 
-      let response: any;
+      let response: CouncilVoteResponse;
       try {
         response = await this.helpers.httpRequest({
           method: 'POST',
@@ -95,6 +101,7 @@ export class CouncilVote implements INodeType {
             persona_ids: personaIds,
           },
           returnFullResponse: false,
+          timeout: 60000,
         });
       } catch (error: any) {
         throw new NodeOperationError(

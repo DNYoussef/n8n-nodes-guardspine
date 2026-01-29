@@ -1,0 +1,122 @@
+{
+  "name": "Department Loop Orchestrator - 24 Departments",
+  "description": "Triggers department evaluation cycles across all 7 categories (24 departments). Each department receives the artifact, runs its domain-specific analysis, returns findings. Results are aggregated into a department-level consensus with KPI tracking.",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [100, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst categories = {\n  product: ['product_management', 'design', 'proof_systems_engineering'],\n  platform: ['risk_semantic_analysis', 'platform_integrations', 'sre_infra'],\n  security: ['product_security', 'trust_evidence', 'compliance_ops', 'privacy_engineering'],\n  revenue: ['enterprise_sales', 'sales_engineering', 'marketing', 'partnerships', 'revops'],\n  delivery: ['implementation', 'customer_success', 'support'],\n  ecosystem: ['dev_rel', 'ospo_standards'],\n  operations: ['legal', 'finance', 'people', 'biz_ops']\n};\n\nconst selectedCategories = item.categories || Object.keys(categories);\nconst departments = [];\nfor (const cat of selectedCategories) {\n  if (categories[cat]) {\n    for (const dept of categories[cat]) {\n      departments.push({ department: dept, category: cat });\n    }\n  }\n}\n\nreturn departments.map(d => ({\n  json: {\n    ...item,\n    _dept: d\n  }\n}));"
+      },
+      "id": "fan-out-depts",
+      "name": "Fan Out to Departments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [350, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json._guardspine_base_url || 'http://guardspine-api:8000' }}/api/v1/departments/{{ $json._dept.department }}/evaluate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $json._api_key }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ artifact: $json.artifact_data, context: $json.context || {} }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "dept-eval",
+      "name": "Department Evaluation (HTTP)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [600, 400],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = items.map(i => {\n  const dept = i.json._dept || {};\n  const response = i.json;\n  return {\n    department: dept.department,\n    category: dept.category,\n    status: response.error ? 'error' : 'completed',\n    findings: response.findings || [],\n    kpis: response.kpis || {},\n    counter_kpis: response.counter_kpis || {},\n    risk_level: response.risk_level || 'unknown',\n    recommendations: response.recommendations || []\n  };\n});\n\n// Aggregate by category\nconst byCategory = {};\nfor (const r of results) {\n  if (!byCategory[r.category]) byCategory[r.category] = [];\n  byCategory[r.category].push(r);\n}\n\n// Overall stats\nconst totalDepts = results.length;\nconst completed = results.filter(r => r.status === 'completed').length;\nconst errors = results.filter(r => r.status === 'error').length;\nconst allFindings = results.flatMap(r => r.findings);\nconst criticals = allFindings.filter(f => f.severity === 'critical');\n\nconst crypto = require('crypto');\nconst evidenceHash = crypto.createHash('sha256')\n  .update(JSON.stringify(results))\n  .digest('hex');\n\nreturn [{\n  json: {\n    summary: {\n      total_departments: totalDepts,\n      completed,\n      errors,\n      total_findings: allFindings.length,\n      critical_findings: criticals.length\n    },\n    by_category: byCategory,\n    all_findings: allFindings,\n    evidence_hash: evidenceHash,\n    evaluated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "aggregate",
+      "name": "Aggregate Department Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.summary.critical_findings }}",
+              "value2": 0,
+              "operation": "gt"
+            }
+          ]
+        }
+      },
+      "id": "critical-check",
+      "name": "Critical Findings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1150, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Escalate to guard lane evaluation for critical findings\nconst item = $input.first().json;\nreturn [{\n  json: {\n    escalation: 'critical_findings_detected',\n    guard_lane: 'deploy',\n    action_type: 'production_deploy',\n    payload: {\n      critical_count: item.summary.critical_findings,\n      departments_affected: Object.keys(item.by_category).length,\n      evidence_hash: item.evidence_hash\n    },\n    department_results: item\n  }\n}];"
+      },
+      "id": "escalate",
+      "name": "Escalate to Guard Lane",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No critical findings - pass through\nconst item = $input.first().json;\nreturn [{\n  json: {\n    status: 'departments_clear',\n    summary: item.summary,\n    evidence_hash: item.evidence_hash\n  }\n}];"
+      },
+      "id": "clear-output",
+      "name": "All Clear Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 500]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Fan Out to Departments", "type": "main", "index": 0 }]]
+    },
+    "Fan Out to Departments": {
+      "main": [[{ "node": "Department Evaluation (HTTP)", "type": "main", "index": 0 }]]
+    },
+    "Department Evaluation (HTTP)": {
+      "main": [[{ "node": "Aggregate Department Results", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Department Results": {
+      "main": [[{ "node": "Critical Findings?", "type": "main", "index": 0 }]]
+    },
+    "Critical Findings?": {
+      "main": [
+        [{ "node": "Escalate to Guard Lane", "type": "main", "index": 0 }],
+        [{ "node": "All Clear Output", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "instanceId": "n8n-guardspine-department-orchestrator-v1",
+    "tags": ["departments", "24-departments", "kpi", "orchestrator", "governance"]
+  }
+}

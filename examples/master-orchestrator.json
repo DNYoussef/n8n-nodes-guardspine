@@ -1,0 +1,570 @@
+{
+  "name": "Master Orchestrator - Artifact Governance",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "governance/evaluate",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        400
+      ],
+      "webhookId": "governance-evaluate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body=.first().json.body||.first().json;\nconst artifact_data=body.artifact_data||body.artifact||{};\nconst artifact_type=body.artifact_type||artifact_data.type||'unknown';\nconst guard_lane=body.guard_lane||null;\nconst priority=body.priority||2;\nconst source=body.source||'external';\nconst requestor=body.requestor||'anonymous';\n\nreturn [{\n  json:{artifact_data,artifact_type,guard_lane,priority,source,requestor,\n    received_at:new Date().toISOString(),\n    governance_run_id:'gov-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)}\n}];"
+      },
+      "id": "prepare-artifact",
+      "name": "Prepare Artifact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "title": "={{.artifact_type}} - governance evaluation",
+        "priority": "={{.priority}}",
+        "status": "in-progress",
+        "tags": "governance,{{.artifact_type}}",
+        "metadata": "={{JSON.stringify({governance_run_id:.governance_run_id,source:.source,requestor:.requestor})}}"
+      },
+      "id": "beads-create",
+      "name": "BeadsCreate",
+      "type": "n8n-nodes-guardspine.beadsCreate",
+      "typeVersion": 1,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "department-loop-orchestrator",
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "artifact",
+              "value": "={{JSON.stringify(.first().json.artifact_data)}}"
+            },
+            {
+              "name": "artifact_type",
+              "value": "={{.first().json.artifact_type}}"
+            },
+            {
+              "name": "bead_id",
+              "value": "={{.bead_id||.id}}"
+            },
+            {
+              "name": "governance_run_id",
+              "value": "={{.first().json.governance_run_id}}"
+            }
+          ]
+        }
+      },
+      "id": "department-loop",
+      "name": "Department Loop",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=.first().json;\nconst deptResults=input.department_results||input.results||[];\nconst prepData=.first().json;\n\nlet hasCritical=false;\nlet maxSeverity=0;\nlet totalFindings=0;\nlet criticalDepts=[];\n\nfor(const dept of deptResults){\n  const findings=dept.findings||[];\n  totalFindings+=findings.length;\n  for(const f of findings){\n    const sev=f.severity||0;\n    if(sev>maxSeverity) maxSeverity=sev;\n    if(sev>=4){\n      hasCritical=true;\n      if(!criticalDepts.includes(dept.department)){\n        criticalDepts.push(dept.department);\n      }\n    }\n  }\n}\n\nlet determined_lane=prepData.guard_lane;\nif(!determined_lane){\n  if(maxSeverity>=4) determined_lane='L4';\n  else if(maxSeverity>=3) determined_lane='L3';\n  else if(maxSeverity>=2) determined_lane='L2';\n  else if(totalFindings>0) determined_lane='L1';\n  else determined_lane='L0';\n}\n\nreturn [{\n  json:{\n    department_results:deptResults,\n    has_critical:hasCritical,\n    max_severity:maxSeverity,\n    total_findings:totalFindings,\n    critical_departments:criticalDepts,\n    guard_lane:determined_lane,\n    artifact_data:prepData.artifact_data,\n    artifact_type:prepData.artifact_type,\n    governance_run_id:prepData.governance_run_id,\n    bead_id:.first().json.bead_id||.first().json.id\n  }\n}];"
+      },
+      "id": "assess-dept-results",
+      "name": "Assess Department Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "guard-lane-evaluation",
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "artifact",
+              "value": "={{JSON.stringify(.artifact_data)}}"
+            },
+            {
+              "name": "guard_lane",
+              "value": "={{.guard_lane}}"
+            },
+            {
+              "name": "department_findings",
+              "value": "={{JSON.stringify(.department_results)}}"
+            },
+            {
+              "name": "governance_run_id",
+              "value": "={{.governance_run_id}}"
+            }
+          ]
+        }
+      },
+      "id": "guard-lane-eval",
+      "name": "Guard Lane Evaluation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{.risk_tier||.guard_lane}}",
+                    "rightValue": "L0",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": "L0-Auto"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{.risk_tier||.guard_lane}}",
+                    "rightValue": "L1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": "L1-Audit"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{.risk_tier||.guard_lane}}",
+                    "rightValue": "L2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{.risk_tier||.guard_lane}}",
+                    "rightValue": "L3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": "L2-L3-Approval"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{.risk_tier||.guard_lane}}",
+                    "rightValue": "L4",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": "L4-Council"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "route-by-risk",
+      "name": "Route by Risk Tier",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=.first().json;\nreturn [{\n  json:{\n    ...input,\n    decision:'auto_approved',\n    decision_reason:'Risk tier L0 - no findings or negligible risk',\n    decided_at:new Date().toISOString(),\n    decided_by:'system',\n    approval_required:false\n  }\n}];"
+      },
+      "id": "auto-approve",
+      "name": "Auto Approve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=.first().json;\nreturn [{\n  json:{\n    ...input,\n    decision:'logged',\n    decision_reason:'Risk tier L1 - minor findings logged for audit trail',\n    decided_at:new Date().toISOString(),\n    decided_by:'system',\n    approval_required:false,\n    audit_entry:{\n      logged_at:new Date().toISOString(),\n      findings_count:(input.findings||[]).length,\n      severity_max:input.max_severity||1\n    }\n  }\n}];"
+      },
+      "id": "audit-log",
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "webhookPath": "governance/approval",
+        "timeout": 86400,
+        "timeoutUnit": "seconds",
+        "approvalPrompt": "Governance approval required for {{.artifact_type}} ({{.risk_tier||.guard_lane}})",
+        "metadata": "={{JSON.stringify({governance_run_id:.governance_run_id,guard_lane:.risk_tier||.guard_lane})}}"
+      },
+      "id": "approval-wait",
+      "name": "ApprovalWait",
+      "type": "n8n-nodes-guardspine.approvalWait",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "council-vote-13-persona",
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "artifact",
+              "value": "={{JSON.stringify(.artifact_data||.artifact||{})}}"
+            },
+            {
+              "name": "findings",
+              "value": "={{JSON.stringify(.findings||.department_results||[])}}"
+            },
+            {
+              "name": "governance_run_id",
+              "value": "={{.governance_run_id}}"
+            },
+            {
+              "name": "guard_lane",
+              "value": "={{.risk_tier||.guard_lane}}"
+            }
+          ]
+        }
+      },
+      "id": "council-vote",
+      "name": "Council Vote",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1800,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=.first().json;\nconst decision=input.decision||input.vote_result||input.approval_status||'unknown';\nconst decided_by=input.council_result?'council':input.approver||input.decided_by||'system';\nconst reason=input.decision_reason||input.rationale||input.approval_note||'';\nconst prepData=.first().json;\nconst assessData=.first().json;\nreturn [{\n  json:{\n    governance_run_id:prepData.governance_run_id,\n    artifact_type:prepData.artifact_type,\n    bead_id:assessData.bead_id,\n    guard_lane:assessData.guard_lane,\n    decision:decision,decision_reason:reason,\n    decided_by:decided_by,\n    decided_at:new Date().toISOString(),\n    total_findings:assessData.total_findings,\n    has_critical:assessData.has_critical,\n    department_summary:(assessData.department_results||[]).map(function(d){\n      return{department:d.department,finding_count:(d.findings||[]).length};\n    }),\n    council_vote:input.council_result||null,\n    approval_details:input.approval_status?{status:input.approval_status,approver:input.approver}:null\n  }\n}];"
+      },
+      "id": "merge-results",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "data": "={{JSON.stringify()}}",
+        "previousHash": "",
+        "sealType": "governance-decision",
+        "metadata": "={{JSON.stringify({run_id:.governance_run_id,lane:.guard_lane,decision:.decision})}}"
+      },
+      "id": "evidence-seal",
+      "name": "EvidenceSeal",
+      "type": "n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [
+        2280,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "beadId": "={{.first().json.bead_id}}",
+        "status": "={{.first().json.decision===\"auto_approved\"||.first().json.decision===\"approved\"?\"done\":.first().json.decision===\"rejected\"?\"blocked\":\"in-progress\"}}",
+        "metadata": "={{JSON.stringify({decision:.first().json.decision,guard_lane:.first().json.guard_lane,evidence_hash:.hash||.seal_hash,sealed_at:.sealed_at})}}"
+      },
+      "id": "beads-update",
+      "name": "BeadsUpdate",
+      "type": "n8n-nodes-guardspine.beadsUpdate",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({success:true,governance_run_id:.first().json.governance_run_id,decision:.first().json.decision,guard_lane:.first().json.guard_lane,bead_id:.first().json.bead_id,evidence_hash:.first().json.hash||.first().json.seal_hash,decided_at:.first().json.decided_at})}}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2720,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Artifact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Artifact": {
+      "main": [
+        [
+          {
+            "node": "BeadsCreate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BeadsCreate": {
+      "main": [
+        [
+          {
+            "node": "Department Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Department Loop": {
+      "main": [
+        [
+          {
+            "node": "Assess Department Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assess Department Results": {
+      "main": [
+        [
+          {
+            "node": "Guard Lane Evaluation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard Lane Evaluation": {
+      "main": [
+        [
+          {
+            "node": "Route by Risk Tier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Risk Tier": {
+      "main": [
+        [
+          {
+            "node": "Auto Approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ApprovalWait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Council Vote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Approve": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ApprovalWait": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Council Vote": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "EvidenceSeal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EvidenceSeal": {
+      "main": [
+        [
+          {
+            "node": "BeadsUpdate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BeadsUpdate": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "guardspine"
+    },
+    {
+      "name": "governance"
+    },
+    {
+      "name": "master-orchestrator"
+    }
+  ],
+  "triggerCount": 1,
+  "meta": {
+    "instanceId": "guardspine-master-orchestrator"
+  }
+}

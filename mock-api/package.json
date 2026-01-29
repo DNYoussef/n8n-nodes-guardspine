@@ -1,0 +1,12 @@
+{
+  "name": "guardspine-mock-api",
+  "version": "1.0.0",
+  "description": "Mock GuardSpine API server for n8n workflow testing",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

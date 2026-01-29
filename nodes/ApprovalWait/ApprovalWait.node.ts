@@ -26,6 +26,8 @@ export class ApprovalWait implements INodeType {
         httpMethod: 'POST',
         responseMode: 'onReceived',
         path: 'approval-callback',
+        isFullPath: false,
+        restartWebhook: true,
       },
     ],
     credentials: [{ name: 'guardSpineApi', required: true }],
@@ -89,14 +91,6 @@ export class ApprovalWait implements INodeType {
       apiKey: string;
     };
 
-    const webhookUrl = this.getNodeWebhookUrl('default');
-    if (!webhookUrl) {
-      throw new NodeOperationError(
-        this.getNode(),
-        'Could not get webhook URL for approval callback',
-      );
-    }
-
     const diffData = this.getNodeParameter('diffData', 0);
     const riskTier = this.getNodeParameter('riskTier', 0) as number;
     const guardType = this.getNodeParameter('guardType', 0) as string;
@@ -104,10 +98,14 @@ export class ApprovalWait implements INodeType {
     const evidenceHash = this.getNodeParameter('evidenceHash', 0) as string;
     const beadId = this.getNodeParameter('beadId', 0) as string;
 
-    // Generate idempotency key from execution context
     const executionId = this.getExecutionId();
     const nodeId = this.getNode().id;
     const idempotencyKey = `${executionId}-${nodeId}`;
+
+    // Build the webhook URL that n8n will listen on for the callback.
+    // n8n exposes waiting webhooks at /webhook-waiting/<path>/<executionId>
+    const baseWebhookUrl = (this as any).getNodeWebhookUrl?.('default')
+      || `${credentials.baseUrl}/webhook-waiting/approval-callback`;
 
     try {
       await this.helpers.httpRequest({
@@ -118,7 +116,7 @@ export class ApprovalWait implements INodeType {
           'Content-Type': 'application/json',
         },
         body: {
-          resume_webhook_url: webhookUrl,
+          resume_webhook_url: baseWebhookUrl,
           diff_data: typeof diffData === 'string' && diffData
             ? JSON.parse(diffData)
             : diffData || null,
@@ -139,8 +137,9 @@ export class ApprovalWait implements INodeType {
       );
     }
 
-    // Suspend execution and wait for webhook callback
-    return this.putExecutionToWait();
+    // Put execution to wait - n8n will resume when webhook fires
+    await this.putExecutionToWait(new Date(Date.now() + timeoutMinutes * 60_000));
+    return [[]];
   }
 
   async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {

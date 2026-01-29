@@ -1,0 +1,569 @@
+{
+  "name": "GuardSpine Department Pipeline",
+  "description": "Routes artifacts through department-specific guard lanes, evaluates policy, classifies risk, and creates evidence bundles.",
+  "tags": ["guardspine", "compliance", "department-pipeline"],
+  "nodes": [
+    {
+      "id": "trigger_1",
+      "name": "Artifact Submitted",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "path": "guardspine-artifact-submit",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "detect_kind_1",
+      "name": "Detect Artifact Kind",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [320, 300],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.artifact_kind }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "code",
+              "output": 0
+            },
+            {
+              "value2": "pdf",
+              "output": 1
+            },
+            {
+              "value2": "sheet",
+              "output": 2
+            },
+            {
+              "value2": "image",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      }
+    },
+    {
+      "id": "guard_code_1",
+      "name": "Code Guard Lane",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [560, 100],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/guard-lanes/code/evaluate",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "department",
+              "value": "={{ $json.department }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "guard_pdf_1",
+      "name": "PDF Guard Lane",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [560, 250],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/guard-lanes/pdf/evaluate",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "department",
+              "value": "={{ $json.department }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "guard_sheet_1",
+      "name": "Sheet Guard Lane",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [560, 400],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/guard-lanes/sheet/evaluate",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "department",
+              "value": "={{ $json.department }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "guard_image_1",
+      "name": "Image Guard Lane",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [560, 550],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/guard-lanes/image/evaluate",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "department",
+              "value": "={{ $json.department }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "merge_1",
+      "name": "Merge Guard Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [800, 300],
+      "parameters": {
+        "mode": "passThrough",
+        "output": "input1"
+      }
+    },
+    {
+      "id": "evaluate_policy_1",
+      "name": "Evaluate Policy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1020, 300],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/policy/evaluate",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "guard_result",
+              "value": "={{ JSON.stringify($json.guard_result) }}"
+            },
+            {
+              "name": "department",
+              "value": "={{ $json.department }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "classify_risk_1",
+      "name": "Classify Risk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1240, 300],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/risk/classify",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "policy_result",
+              "value": "={{ JSON.stringify($json.policy_result) }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "approval_router_1",
+      "name": "Route by Risk Level",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1460, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.risk_tier }}",
+              "operation": "equal",
+              "value2": "low"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "auto_approve_1",
+      "name": "Auto Approve",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1680, 200],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "approval_status",
+              "value": "auto_approved"
+            },
+            {
+              "name": "approved_by",
+              "value": "system"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "approval_queue_1",
+      "name": "Send to Approval Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1680, 400],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/approval-queue/submit",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "risk_tier",
+              "value": "={{ $json.risk_tier }}"
+            },
+            {
+              "name": "department",
+              "value": "={{ $json.department }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "merge_approval_1",
+      "name": "Merge Approval Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [1920, 300],
+      "parameters": {
+        "mode": "passThrough",
+        "output": "input1"
+      }
+    },
+    {
+      "id": "create_bundle_1",
+      "name": "Create Evidence Bundle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2140, 300],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/evidence/bundle",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            },
+            {
+              "name": "guard_result",
+              "value": "={{ JSON.stringify($json.guard_result) }}"
+            },
+            {
+              "name": "policy_result",
+              "value": "={{ JSON.stringify($json.policy_result) }}"
+            },
+            {
+              "name": "risk_tier",
+              "value": "={{ $json.risk_tier }}"
+            },
+            {
+              "name": "approval_status",
+              "value": "={{ $json.approval_status }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "id": "store_1",
+      "name": "Store Bundle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2360, 300],
+      "parameters": {
+        "url": "={{ $env.GUARDSPINE_API_URL }}/api/v1/evidence/store",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "bundle_id",
+              "value": "={{ $json.bundle_id }}"
+            },
+            {
+              "name": "artifact_id",
+              "value": "={{ $json.artifact_id }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    }
+  ],
+  "connections": {
+    "Artifact Submitted": {
+      "main": [
+        [
+          {
+            "node": "Detect Artifact Kind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Artifact Kind": {
+      "main": [
+        [
+          {
+            "node": "Code Guard Lane",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PDF Guard Lane",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheet Guard Lane",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Image Guard Lane",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Guard Lane": {
+      "main": [
+        [
+          {
+            "node": "Merge Guard Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF Guard Lane": {
+      "main": [
+        [
+          {
+            "node": "Merge Guard Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheet Guard Lane": {
+      "main": [
+        [
+          {
+            "node": "Merge Guard Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Guard Lane": {
+      "main": [
+        [
+          {
+            "node": "Merge Guard Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Guard Results": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Policy": {
+      "main": [
+        [
+          {
+            "node": "Classify Risk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Risk": {
+      "main": [
+        [
+          {
+            "node": "Route by Risk Level",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Risk Level": {
+      "main": [
+        [
+          {
+            "node": "Auto Approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send to Approval Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Approve": {
+      "main": [
+        [
+          {
+            "node": "Merge Approval Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Approval Queue": {
+      "main": [
+        [
+          {
+            "node": "Merge Approval Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Approval Paths": {
+      "main": [
+        [
+          {
+            "node": "Create Evidence Bundle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Evidence Bundle": {
+      "main": [
+        [
+          {
+            "node": "Store Bundle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

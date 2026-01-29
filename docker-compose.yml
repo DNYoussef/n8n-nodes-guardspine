@@ -1,0 +1,68 @@
+version: "3.8"
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_CUSTOM_EXTENSIONS=/custom-nodes
+      - EXTERNAL_HOOK_FILES=/hooks/guardspine-hooks.js
+      - GENERIC_TIMEZONE=America/New_York
+      - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=http://localhost:5678/
+      - GUARDSPINE_API_URL=http://mock-api:8000
+      - GUARDSPINE_API_KEY=guardspine-dev-key
+      - GUARDSPINE_MODE=audit
+      - GUARDSPINE_RISK_THRESHOLD=3
+      - GUARDSPINE_LANES=all
+      # LLM Configuration (GS-1.2)
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GUARDSPINE_BACKEND=${GUARDSPINE_BACKEND:-auto}
+      - GUARDSPINE_MODEL=${GUARDSPINE_MODEL:-anthropic/claude-sonnet-4.5}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./dist:/custom-nodes/node_modules/n8n-nodes-guardspine/dist
+      - ./package.json:/custom-nodes/node_modules/n8n-nodes-guardspine/package.json
+      - ./hooks:/hooks
+    depends_on:
+      mock-api:
+        condition: service_healthy
+    networks:
+      - guardspine-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mock-api:
+    build:
+      context: ./mock-api
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Configuration passthrough (GS-1.2)
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GUARDSPINE_BACKEND=${GUARDSPINE_BACKEND:-auto}
+      - GUARDSPINE_MODEL=${GUARDSPINE_MODEL:-anthropic/claude-sonnet-4.5}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    networks:
+      - guardspine-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  n8n_data:
+
+networks:
+  guardspine-net:
+    driver: bridge

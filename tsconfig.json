@@ -16,8 +16,10 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
+    "index.ts",
     "credentials/**/*.ts",
-    "nodes/**/*.ts"
+    "nodes/**/*.ts",
+    "hooks/**/*.ts"
   ],
   "exclude": [
     "node_modules",

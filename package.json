@@ -4,6 +4,18 @@
   "description": "n8n nodes for GuardSpine governance layer",
   "license": "MIT",
   "author": "David Youssef",
+  "keywords": [
+    "n8n",
+    "n8n-community-node-package",
+    "guardspine",
+    "governance",
+    "approval",
+    "quality-gate"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DNYoussef/n8n-nodes-guardspine.git"
+  },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -24,7 +36,11 @@
       "dist/nodes/ApprovalWait/ApprovalWait.node.js",
       "dist/nodes/BeadsUpdate/BeadsUpdate.node.js",
       "dist/nodes/EvidenceSeal/EvidenceSeal.node.js",
-      "dist/nodes/CouncilVote/CouncilVote.node.js"
+      "dist/nodes/CouncilVote/CouncilVote.node.js",
+      "dist/nodes/GuardSpineCompress/GuardSpineCompress.node.js",
+      "dist/nodes/GuardSpinePDFGuard/GuardSpinePDFGuard.node.js",
+      "dist/nodes/GuardSpineSheetGuard/GuardSpineSheetGuard.node.js",
+      "dist/nodes/GuardSpineImageGuard/GuardSpineImageGuard.node.js"
     ]
   },
   "files": [
@@ -32,9 +48,12 @@
   ],
   "devDependencies": {
     "@types/jest": "^29.5.0",
+    "@types/nock": "^10.0.3",
     "@types/node": "^20.0.0",
     "jest": "^29.7.0",
+    "nock": "^13.5.0",
     "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.0"
   },
   "peerDependencies": {

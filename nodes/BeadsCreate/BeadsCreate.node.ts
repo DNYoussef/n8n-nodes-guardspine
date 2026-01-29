@@ -6,6 +6,8 @@ import {
   NodeOperationError,
 } from 'n8n-workflow';
 
+import type { BeadsCreateResponse } from '../types';
+
 export class BeadsCreate implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Beads Create',
@@ -70,7 +72,7 @@ export class BeadsCreate implements INodeType {
         ? labelsStr.split(',').map((l: string) => l.trim()).filter(Boolean)
         : [];
 
-      let response: any;
+      let response: BeadsCreateResponse;
       try {
         response = await this.helpers.httpRequest({
           method: 'POST',
@@ -81,6 +83,7 @@ export class BeadsCreate implements INodeType {
           },
           body: { title, description, priority, labels },
           returnFullResponse: false,
+          timeout: 15000,
         });
       } catch (error: any) {
         throw new NodeOperationError(

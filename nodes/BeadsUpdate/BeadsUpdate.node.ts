@@ -6,6 +6,8 @@ import {
   NodeOperationError,
 } from 'n8n-workflow';
 
+import type { BeadsUpdateResponse, BeadsEvidenceResponse } from '../types';
+
 export class BeadsUpdate implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Beads Update',
@@ -120,7 +122,7 @@ export class BeadsUpdate implements INodeType {
       const operation = this.getNodeParameter('operation', i) as string;
       const taskId = this.getNodeParameter('taskId', i) as string;
 
-      let response: any;
+      let response: BeadsUpdateResponse | BeadsEvidenceResponse;
       try {
         if (operation === 'updateTask') {
           const status = this.getNodeParameter('status', i) as string;
@@ -128,7 +130,7 @@ export class BeadsUpdate implements INodeType {
           const labelsStr = this.getNodeParameter('labels', i) as string;
           const description = this.getNodeParameter('description', i) as string;
 
-          const body: Record<string, any> = { status, priority };
+          const body: Record<string, unknown> = { status, priority };
           if (labelsStr) {
             body.labels = labelsStr.split(',').map((l: string) => l.trim()).filter(Boolean);
           }
@@ -145,16 +147,20 @@ export class BeadsUpdate implements INodeType {
             },
             body,
             returnFullResponse: false,
+            timeout: 15000,
           });
         } else {
           // addEvidence
           const evidenceHash = this.getNodeParameter('evidenceHash', i) as string;
           const evidenceType = this.getNodeParameter('evidenceType', i) as string;
           const evidenceDataRaw = this.getNodeParameter('evidenceData', i);
-          const evidenceData =
-            typeof evidenceDataRaw === 'string'
-              ? JSON.parse(evidenceDataRaw)
-              : evidenceDataRaw;
+          let evidenceData: Record<string, unknown>;
+          try {
+            evidenceData = typeof evidenceDataRaw === 'string'
+              ? JSON.parse(evidenceDataRaw) : evidenceDataRaw;
+          } catch {
+            throw new NodeOperationError(this.getNode(), 'Invalid JSON in Evidence Data', { itemIndex: i });
+          }
 
           response = await this.helpers.httpRequest({
             method: 'PUT',
@@ -169,6 +175,7 @@ export class BeadsUpdate implements INodeType {
               evidence_data: evidenceData,
             },
             returnFullResponse: false,
+            timeout: 15000,
           });
         }
       } catch (error: any) {
@@ -186,7 +193,7 @@ export class BeadsUpdate implements INodeType {
             id: response.id || taskId,
             status: response.status,
             operation,
-            ...(response.evidence_hash ? { evidence_hash: response.evidence_hash } : {}),
+            ...('evidence' in response && response.evidence?.[0]?.evidence_hash ? { evidence_hash: response.evidence[0].evidence_hash } : {}),
           },
         },
       });

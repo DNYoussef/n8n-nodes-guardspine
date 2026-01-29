@@ -6,6 +6,8 @@ import {
   NodeOperationError,
 } from 'n8n-workflow';
 
+import type { GuardEvaluateResponse } from '../types';
+
 export class GuardGate implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'GuardSpine Gate',
@@ -89,7 +91,7 @@ export class GuardGate implements INodeType {
       const blockTier = this.getNodeParameter('blockTier', i) as number;
       const createBead = this.getNodeParameter('createBead', i) as boolean;
 
-      let response: any;
+      let response: GuardEvaluateResponse;
       try {
         response = await this.helpers.httpRequest({
           method: 'POST',
@@ -108,6 +110,7 @@ export class GuardGate implements INodeType {
             create_bead: createBead,
           },
           returnFullResponse: false,
+          timeout: 30000,
         });
       } catch (error: any) {
         throw new NodeOperationError(
