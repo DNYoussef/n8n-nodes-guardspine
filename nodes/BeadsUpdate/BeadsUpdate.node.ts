@@ -121,6 +121,9 @@ export class BeadsUpdate implements INodeType {
     for (let i = 0; i < items.length; i++) {
       const operation = this.getNodeParameter('operation', i) as string;
       const taskId = this.getNodeParameter('taskId', i) as string;
+      if (!taskId.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Task ID is required', { itemIndex: i });
+      }
 
       let response: BeadsUpdateResponse | BeadsEvidenceResponse;
       try {
@@ -152,6 +155,9 @@ export class BeadsUpdate implements INodeType {
         } else {
           // addEvidence
           const evidenceHash = this.getNodeParameter('evidenceHash', i) as string;
+          if (!evidenceHash.trim()) {
+            throw new NodeOperationError(this.getNode(), 'Evidence Hash is required', { itemIndex: i });
+          }
           const evidenceType = this.getNodeParameter('evidenceType', i) as string;
           const evidenceDataRaw = this.getNodeParameter('evidenceData', i);
           let evidenceData: Record<string, unknown>;

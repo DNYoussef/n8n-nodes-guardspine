@@ -102,10 +102,16 @@ export class GuardGate implements INodeType {
           },
           body: {
             artifact_type: artifactType,
-            artifact_data:
-              typeof artifactData === 'string'
-                ? JSON.parse(artifactData)
-                : artifactData,
+            artifact_data: (() => {
+              if (typeof artifactData === 'string') {
+                try {
+                  return JSON.parse(artifactData);
+                } catch {
+                  throw new NodeOperationError(this.getNode(), 'Invalid JSON in Artifact Data field', { itemIndex: i });
+                }
+              }
+              return artifactData;
+            })(),
             rubric_pack_id: rubricPack,
             create_bead: createBead,
           },

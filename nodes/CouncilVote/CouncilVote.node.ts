@@ -70,6 +70,9 @@ export class CouncilVote implements INodeType {
 
     for (let i = 0; i < items.length; i++) {
       const question = this.getNodeParameter('question', i) as string;
+      if (!question.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Question is required', { itemIndex: i });
+      }
       const contextRaw = this.getNodeParameter('context', i);
       const votingMode = this.getNodeParameter('votingMode', i) as string;
       const personaIdsRaw = this.getNodeParameter('personaIds', i) as string;

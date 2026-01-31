@@ -65,6 +65,9 @@ export class BeadsCreate implements INodeType {
 
     for (let i = 0; i < items.length; i++) {
       const title = this.getNodeParameter('title', i) as string;
+      if (!title.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Title is required', { itemIndex: i });
+      }
       const description = this.getNodeParameter('description', i) as string;
       const priority = this.getNodeParameter('priority', i) as number;
       const labelsStr = this.getNodeParameter('labels', i) as string;

@@ -75,6 +75,15 @@ export class EvidenceSeal implements INodeType {
       const diffHash = this.getNodeParameter('diffHash', i) as string;
       const approverId = this.getNodeParameter('approverId', i) as string;
       const policyRef = this.getNodeParameter('policyRef', i) as string;
+      if (!diffHash.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Diff Hash is required', { itemIndex: i });
+      }
+      if (!approverId.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Approver ID is required', { itemIndex: i });
+      }
+      if (!policyRef.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Policy Ref is required', { itemIndex: i });
+      }
       const previousChainHash = this.getNodeParameter('previousChainHash', i) as string;
       const metadataRaw = this.getNodeParameter('metadata', i);
 

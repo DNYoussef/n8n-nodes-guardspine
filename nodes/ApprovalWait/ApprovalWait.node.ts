@@ -98,6 +98,18 @@ export class ApprovalWait implements INodeType {
     const evidenceHash = this.getNodeParameter('evidenceHash', 0) as string;
     const beadId = this.getNodeParameter('beadId', 0) as string;
 
+    // Parse diff data safely
+    let parsedDiffData: unknown = null;
+    if (typeof diffData === 'string' && diffData) {
+      try {
+        parsedDiffData = JSON.parse(diffData);
+      } catch {
+        throw new NodeOperationError(this.getNode(), 'Invalid JSON in Diff Data field');
+      }
+    } else if (diffData) {
+      parsedDiffData = diffData;
+    }
+
     const executionId = this.getExecutionId();
     const nodeId = this.getNode().id;
     const idempotencyKey = `${executionId}-${nodeId}`;
@@ -117,9 +129,7 @@ export class ApprovalWait implements INodeType {
         },
         body: {
           resume_webhook_url: baseWebhookUrl,
-          diff_data: typeof diffData === 'string' && diffData
-            ? JSON.parse(diffData)
-            : diffData || null,
+          diff_data: parsedDiffData,
           risk_tier: riskTier,
           guard_type: guardType,
           workflow_execution_id: executionId,

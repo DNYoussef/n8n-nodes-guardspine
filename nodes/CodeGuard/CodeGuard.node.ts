@@ -65,6 +65,9 @@ export class CodeGuard implements INodeType {
 
     for (let i = 0; i < items.length; i++) {
       const diffText = this.getNodeParameter('diffText', i) as string;
+      if (!diffText.trim()) {
+        throw new NodeOperationError(this.getNode(), 'Diff Text is required', { itemIndex: i });
+      }
       const gateType = this.getNodeParameter('gateType', i) as string;
       const blockTier = this.getNodeParameter('blockTier', i) as number;
 
