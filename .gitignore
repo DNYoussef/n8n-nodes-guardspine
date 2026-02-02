@@ -4,3 +4,7 @@ dist/
 *.d.ts
 *.js.map
 !jest.config.ts
+
+# Temporary files (may contain credentials)
+tmp-*.json
+tmp-*.txt
