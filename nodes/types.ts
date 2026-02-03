@@ -92,3 +92,14 @@ export interface ApprovalStatusResponse {
 	status: string;
 	decided_at: string;
 }
+
+export interface BundleImportResponse {
+	bundle_id: string;
+	raw_sha256: string;
+	imported_at: string;
+	verified: boolean;
+	errors: string[];
+	version: string;
+	item_count: number;
+	root_hash: string | null;
+}

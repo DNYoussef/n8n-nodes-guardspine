@@ -74,7 +74,7 @@ export class GuardSpineSheetGuard implements INodeType {
             'Content-Type': 'application/json',
           },
           body: {
-            artifact_kind: 'xlsx',
+            artifact_type: 'xlsx',
             artifact_data: items[i].json,
             rubric_pack_id: policyPackId,
             create_bead: true,
@@ -94,7 +94,7 @@ export class GuardSpineSheetGuard implements INodeType {
         json: {
           ...items[i].json,
           _guard: {
-            artifact_kind: 'xlsx',
+            artifact_type: 'xlsx',
             risk_tier: response.risk_tier,
             score: response.score,
             violations: response.violations,

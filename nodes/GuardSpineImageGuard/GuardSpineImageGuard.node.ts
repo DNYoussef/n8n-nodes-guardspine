@@ -74,7 +74,7 @@ export class GuardSpineImageGuard implements INodeType {
             'Content-Type': 'application/json',
           },
           body: {
-            artifact_kind: 'image',
+            artifact_type: 'image',
             artifact_data: items[i].json,
             rubric_pack_id: policyPackId,
             create_bead: true,
@@ -94,7 +94,7 @@ export class GuardSpineImageGuard implements INodeType {
         json: {
           ...items[i].json,
           _guard: {
-            artifact_kind: 'image',
+            artifact_type: 'image',
             risk_tier: response.risk_tier,
             score: response.score,
             violations: response.violations,
