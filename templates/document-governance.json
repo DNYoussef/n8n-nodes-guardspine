@@ -1,0 +1,284 @@
+{
+  "name": "Document Governance",
+  "description": "Evaluates document PRs through type-specific guards (PDF/Sheet/Image), blocks L2+ risk, seals evidence, creates beads.",
+  "tags": ["guardspine", "document", "governance", "compliance"],
+  "nodes": [
+    {
+      "id": "trigger_1",
+      "name": "Docs PR Opened",
+      "type": "n8n-nodes-base.githubTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "owner": "={{ $env.GITHUB_OWNER }}",
+        "repository": "={{ $env.GITHUB_DOCS_REPO }}",
+        "events": ["pull_request"],
+        "action": "opened"
+      }
+    },
+    {
+      "id": "detect_type_1",
+      "name": "Detect File Type",
+      "type": "n8n-nodes-guardspine.guardGate",
+      "typeVersion": 1,
+      "position": [340, 300],
+      "parameters": {
+        "artifactData": "={{ JSON.stringify($json) }}",
+        "artifactType": "generic",
+        "rubricPack": "document-triage",
+        "blockTier": 5,
+        "createBead": false
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "route_type_1",
+      "name": "Route by File Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [580, 300],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json._guard.detected_type || 'pdf' }}",
+        "rules": {
+          "rules": [
+            { "value2": "pdf", "output": 0 },
+            { "value2": "sheet", "output": 1 },
+            { "value2": "image", "output": 2 }
+          ]
+        },
+        "fallbackOutput": 0
+      }
+    },
+    {
+      "id": "pdf_guard_1",
+      "name": "PDF Guard",
+      "type": "n8n-nodes-guardspine.guardSpinePDFGuard",
+      "typeVersion": 1,
+      "position": [820, 150],
+      "parameters": {},
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "sheet_guard_1",
+      "name": "Sheet Guard",
+      "type": "n8n-nodes-guardspine.guardSpineSheetGuard",
+      "typeVersion": 1,
+      "position": [820, 300],
+      "parameters": {},
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "image_guard_1",
+      "name": "Image Guard",
+      "type": "n8n-nodes-guardspine.guardSpineImageGuard",
+      "typeVersion": 1,
+      "position": [820, 450],
+      "parameters": {},
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "merge_1",
+      "name": "Merge Guard Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [1060, 300],
+      "parameters": {
+        "mode": "passThrough",
+        "output": "input1"
+      }
+    },
+    {
+      "id": "risk_check_1",
+      "name": "Risk >= L2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1280, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json._guard.risk_tier || $json.risk_tier || 0 }}",
+              "operation": "largerEqual",
+              "value2": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "approval_1",
+      "name": "Approval Gate",
+      "type": "n8n-nodes-guardspine.approvalWait",
+      "typeVersion": 1,
+      "position": [1520, 200],
+      "parameters": {
+        "diffData": "={{ JSON.stringify($json) }}",
+        "riskTier": "={{ $json._guard.risk_tier || $json.risk_tier || 2 }}",
+        "guardType": "document",
+        "timeoutMinutes": 60,
+        "evidenceHash": "={{ $json._guard.evidence_hash || '' }}",
+        "beadId": ""
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "slack_1",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1760, 100],
+      "parameters": {
+        "channel": "={{ $env.SLACK_GOVERNANCE_CHANNEL }}",
+        "text": "Document PR {{ $json.decision }}: {{ $json.reason || 'No reason provided' }}",
+        "attachments": []
+      }
+    },
+    {
+      "id": "seal_1",
+      "name": "Evidence Seal",
+      "type": "n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [2000, 100],
+      "parameters": {
+        "diffHash": "={{ $json._guard.evidence_hash || '' }}",
+        "approverId": "={{ $json.decided_by || 'system' }}",
+        "policyRef": "document-governance-v1",
+        "previousChainHash": "",
+        "metadata": ""
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "bead_1",
+      "name": "Create Bead",
+      "type": "n8n-nodes-guardspine.beadsCreate",
+      "typeVersion": 1,
+      "position": [2240, 100],
+      "parameters": {
+        "title": "Doc governance: {{ $json._evidence_seal.chain_hash || 'sealed' }}",
+        "description": "Automated document governance bead",
+        "priority": 2,
+        "labels": "doc-governance,automated"
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "auto_seal_1",
+      "name": "Auto Seal (Low Risk)",
+      "type": "n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [1520, 400],
+      "parameters": {
+        "diffHash": "={{ $json._guard.evidence_hash || '' }}",
+        "approverId": "system",
+        "policyRef": "document-governance-v1",
+        "previousChainHash": "",
+        "metadata": "{\"auto_approved\": true}"
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "auto_bead_1",
+      "name": "Create Bead (Auto)",
+      "type": "n8n-nodes-guardspine.beadsCreate",
+      "typeVersion": 1,
+      "position": [1760, 400],
+      "parameters": {
+        "title": "Doc governance (auto): {{ $json._evidence_seal.chain_hash || 'sealed' }}",
+        "description": "Auto-approved low-risk document governance bead",
+        "priority": 1,
+        "labels": "doc-governance,auto-approved"
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    }
+  ],
+  "connections": {
+    "Docs PR Opened": {
+      "main": [
+        [{ "node": "Detect File Type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Detect File Type": {
+      "main": [
+        [{ "node": "Route by File Type", "type": "main", "index": 0 }],
+        [{ "node": "Route by File Type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by File Type": {
+      "main": [
+        [{ "node": "PDF Guard", "type": "main", "index": 0 }],
+        [{ "node": "Sheet Guard", "type": "main", "index": 0 }],
+        [{ "node": "Image Guard", "type": "main", "index": 0 }]
+      ]
+    },
+    "PDF Guard": {
+      "main": [
+        [{ "node": "Merge Guard Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheet Guard": {
+      "main": [
+        [{ "node": "Merge Guard Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Image Guard": {
+      "main": [
+        [{ "node": "Merge Guard Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Merge Guard Results": {
+      "main": [
+        [{ "node": "Risk >= L2?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Risk >= L2?": {
+      "main": [
+        [{ "node": "Approval Gate", "type": "main", "index": 0 }],
+        [{ "node": "Auto Seal (Low Risk)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Approval Gate": {
+      "main": [
+        [{ "node": "Slack Notification", "type": "main", "index": 0 }],
+        [{ "node": "Slack Notification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Slack Notification": {
+      "main": [
+        [{ "node": "Evidence Seal", "type": "main", "index": 0 }]
+      ]
+    },
+    "Evidence Seal": {
+      "main": [
+        [{ "node": "Create Bead", "type": "main", "index": 0 }]
+      ]
+    },
+    "Auto Seal (Low Risk)": {
+      "main": [
+        [{ "node": "Create Bead (Auto)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

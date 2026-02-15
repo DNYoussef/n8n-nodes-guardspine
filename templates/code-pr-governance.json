@@ -1,0 +1,162 @@
+{
+  "name": "Code PR Governance",
+  "description": "Evaluates pull requests with CodeGuard, blocks high-risk (L3+), requires human approval, seals evidence.",
+  "tags": ["guardspine", "code-review", "governance", "pr"],
+  "nodes": [
+    {
+      "id": "trigger_1",
+      "name": "PR Opened",
+      "type": "n8n-nodes-base.githubTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "owner": "={{ $env.GITHUB_OWNER }}",
+        "repository": "={{ $env.GITHUB_REPO }}",
+        "events": ["pull_request"],
+        "action": "opened"
+      }
+    },
+    {
+      "id": "codeguard_1",
+      "name": "CodeGuard Scan",
+      "type": "n8n-nodes-guardspine.codeGuard",
+      "typeVersion": 1,
+      "position": [340, 300],
+      "parameters": {
+        "diffText": "={{ $json.pull_request.diff_url }}",
+        "gateType": "standard",
+        "blockTier": 3
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "risk_check_1",
+      "name": "Risk >= L3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [580, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json._code_guard.risk_tier }}",
+              "operation": "largerEqual",
+              "value2": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "approval_1",
+      "name": "Approval Gate",
+      "type": "n8n-nodes-guardspine.approvalWait",
+      "typeVersion": 1,
+      "position": [820, 200],
+      "parameters": {
+        "diffData": "={{ JSON.stringify($json) }}",
+        "riskTier": "={{ $json._code_guard.risk_tier }}",
+        "guardType": "code",
+        "timeoutMinutes": 120,
+        "evidenceHash": "={{ $json._code_guard.evidence_hash }}",
+        "beadId": ""
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "slack_approved_1",
+      "name": "Slack: Approved",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1060, 100],
+      "parameters": {
+        "channel": "={{ $env.SLACK_GOVERNANCE_CHANNEL }}",
+        "text": "PR approved by {{ $json.decided_by }}: {{ $json.reason }}",
+        "attachments": []
+      }
+    },
+    {
+      "id": "slack_rejected_1",
+      "name": "Slack: Rejected",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1060, 300],
+      "parameters": {
+        "channel": "={{ $env.SLACK_GOVERNANCE_CHANNEL }}",
+        "text": "PR rejected by {{ $json.decided_by }}: {{ $json.reason }}",
+        "attachments": []
+      }
+    },
+    {
+      "id": "seal_1",
+      "name": "Evidence Seal",
+      "type": "n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [1300, 100],
+      "parameters": {
+        "diffHash": "={{ $json._code_guard.evidence_hash || '' }}",
+        "approverId": "={{ $json.decided_by || 'system' }}",
+        "policyRef": "code-pr-governance-v1",
+        "previousChainHash": "",
+        "metadata": ""
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    },
+    {
+      "id": "auto_pass_1",
+      "name": "Auto Pass (Low Risk)",
+      "type": "n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [820, 400],
+      "parameters": {
+        "diffHash": "={{ $json._code_guard.evidence_hash || '' }}",
+        "approverId": "system",
+        "policyRef": "code-pr-governance-v1",
+        "previousChainHash": "",
+        "metadata": "{\"auto_approved\": true}"
+      },
+      "credentials": {
+        "guardSpineApi": { "id": "1", "name": "GuardSpine" }
+      }
+    }
+  ],
+  "connections": {
+    "PR Opened": {
+      "main": [
+        [{ "node": "CodeGuard Scan", "type": "main", "index": 0 }]
+      ]
+    },
+    "CodeGuard Scan": {
+      "main": [
+        [{ "node": "Risk >= L3?", "type": "main", "index": 0 }],
+        [{ "node": "Risk >= L3?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Risk >= L3?": {
+      "main": [
+        [{ "node": "Approval Gate", "type": "main", "index": 0 }],
+        [{ "node": "Auto Pass (Low Risk)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Approval Gate": {
+      "main": [
+        [{ "node": "Slack: Approved", "type": "main", "index": 0 }],
+        [{ "node": "Slack: Rejected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Slack: Approved": {
+      "main": [
+        [{ "node": "Evidence Seal", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

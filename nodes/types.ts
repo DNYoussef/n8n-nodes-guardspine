@@ -103,3 +103,26 @@ export interface BundleImportResponse {
 	item_count: number;
 	root_hash: string | null;
 }
+
+export interface BeadsListItem {
+	id: string;
+	title: string;
+	status: string;
+	priority: string;
+	owner: string | null;
+	tags: string[];
+	created_at: string;
+}
+
+export interface BeadsListResponse {
+	items: BeadsListItem[];
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export interface GuardSpineEvent {
+	event_type: string;
+	timestamp: string;
+	payload: Record<string, unknown>;
+}

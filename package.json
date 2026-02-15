@@ -30,17 +30,20 @@
       "dist/credentials/GuardSpineApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/GuardGate/GuardGate.node.js",
-      "dist/nodes/CodeGuard/CodeGuard.node.js",
-      "dist/nodes/BeadsCreate/BeadsCreate.node.js",
       "dist/nodes/ApprovalWait/ApprovalWait.node.js",
+      "dist/nodes/BeadsCreate/BeadsCreate.node.js",
+      "dist/nodes/BeadsList/BeadsList.node.js",
       "dist/nodes/BeadsUpdate/BeadsUpdate.node.js",
-      "dist/nodes/EvidenceSeal/EvidenceSeal.node.js",
+      "dist/nodes/BundleImport/BundleImport.node.js",
+      "dist/nodes/CodeGuard/CodeGuard.node.js",
       "dist/nodes/CouncilVote/CouncilVote.node.js",
+      "dist/nodes/EvidenceSeal/EvidenceSeal.node.js",
+      "dist/nodes/GuardGate/GuardGate.node.js",
       "dist/nodes/GuardSpineCompress/GuardSpineCompress.node.js",
+      "dist/nodes/GuardSpineImageGuard/GuardSpineImageGuard.node.js",
       "dist/nodes/GuardSpinePDFGuard/GuardSpinePDFGuard.node.js",
       "dist/nodes/GuardSpineSheetGuard/GuardSpineSheetGuard.node.js",
-      "dist/nodes/GuardSpineImageGuard/GuardSpineImageGuard.node.js"
+      "dist/nodes/GuardSpineTrigger/GuardSpineTrigger.node.js"
     ]
   },
   "files": [
