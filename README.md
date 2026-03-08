@@ -1,6 +1,6 @@
 # n8n-nodes-guardspine
 
-n8n community nodes for [GuardSpine](https://github.com/DNYoussef/life-os-dashboard) governance layer.
+n8n community nodes for [GuardSpine](https://github.com/DNYoussef/GuardSpine) governance layer.
 
 ## Nodes
 

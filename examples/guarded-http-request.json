@@ -1,0 +1,188 @@
+{
+  "name": "Guarded HTTP Request",
+  "description": "Reusable sub-workflow that wraps any HTTP request with governance guards. Pattern: GuardGate evaluates the request payload, blocks if risk tier exceeds threshold, executes the HTTP request on pass, then seals the request/response as evidence. Call this instead of raw HTTP Request nodes to ensure every external call is governed.",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "sub-trigger",
+      "name": "Sub-Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "notes": "Expects input: { url, method, headers, body, rubricPack, blockTier, policyRef, approverId }"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build the artifact payload for GuardGate evaluation.\n// Includes the target URL, method, and body so the rubric\n// can assess risk based on what we are about to send.\nconst item = $input.first();\nconst d = item.json;\nreturn [{\n  json: {\n    _request: {\n      url: d.url || '',\n      method: (d.method || 'GET').toUpperCase(),\n      headers: d.headers || {},\n      body: d.body || null\n    },\n    _config: {\n      rubricPack: d.rubricPack || 'nomotic-core',\n      blockTier: d.blockTier != null ? d.blockTier : 2,\n      policyRef: d.policyRef || 'guarded-http-request-v1',\n      approverId: d.approverId || 'system:guarded-http'\n    }\n  }\n}];"
+      },
+      "id": "prepare-artifact",
+      "name": "Prepare Artifact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "artifactData": "={{ JSON.stringify($json._request) }}",
+        "artifactType": "generic",
+        "rubricPack": "={{ $json._config.rubricPack }}",
+        "blockTier": "={{ $json._config.blockTier }}",
+        "createBead": true
+      },
+      "id": "guard-gate",
+      "name": "GuardGate - Pre-Request",
+      "type": "@guardspine/n8n-nodes-guardspine.guardGate",
+      "typeVersion": 1,
+      "position": [550, 300],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "method": "={{ $json._request.method }}",
+        "url": "={{ $json._request.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "={{ $json._request.headers['Content-Type'] || 'application/json' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._request.body || {}) }}",
+        "options": {
+          "timeout": 30000,
+          "fullResponse": true
+        }
+      },
+      "id": "http-request",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge the HTTP response back with guard metadata\n// so EvidenceSeal has the full picture.\nconst item = $input.first();\nconst guard = item.json._guard || {};\nconst config = item.json._config || {};\nconst request = item.json._request || {};\n\n// The HTTP Request node replaces $json with response data.\n// We reconstruct a unified object.\nreturn [{\n  json: {\n    _request: request,\n    _response: {\n      statusCode: item.json.statusCode || item.json.status || 200,\n      body: item.json.body || item.json.data || item.json,\n      received_at: new Date().toISOString()\n    },\n    _guard: guard,\n    _config: config\n  }\n}];"
+      },
+      "id": "merge-response",
+      "name": "Merge Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "diffHash": "={{ $json._guard.evidence_hash || '' }}",
+        "approverId": "={{ $json._config.approverId || 'system:guarded-http' }}",
+        "policyRef": "={{ $json._config.policyRef || 'guarded-http-request-v1' }}",
+        "previousChainHash": "",
+        "metadata": "={{ JSON.stringify({ url: $json._request.url, method: $json._request.method, status: $json._response.statusCode, risk_tier: $json._guard.risk_tier, workflow: 'guarded-http-request' }) }}"
+      },
+      "id": "evidence-seal",
+      "name": "Evidence Seal",
+      "type": "@guardspine/n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [1300, 200],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build a blocked response so the caller knows why.\nconst item = $input.first();\nconst guard = item.json._guard || {};\nreturn [{\n  json: {\n    blocked: true,\n    risk_tier: guard.risk_tier,\n    violations: guard.violations || [],\n    evidence_hash: guard.evidence_hash || '',\n    bead_id: guard.bead_id || null,\n    message: 'Request blocked by GuardGate: risk tier ' + (guard.risk_tier || 'unknown') + ' exceeds threshold'\n  }\n}];"
+      },
+      "id": "blocked-response",
+      "name": "Blocked Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 450]
+    }
+  ],
+  "connections": {
+    "Sub-Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Artifact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Artifact": {
+      "main": [
+        [
+          {
+            "node": "GuardGate - Pre-Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GuardGate - Pre-Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Blocked Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Response": {
+      "main": [
+        [
+          {
+            "node": "Evidence Seal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "n8n-guardspine-guarded-http-request-v1",
+    "created": "2026-03-08T00:00:00Z",
+    "documentationUrl": "https://github.com/DNYoussef/n8n-nodes-guardspine/blob/main/examples/GOVERNANCE.md",
+    "tags": [
+      "governance",
+      "guardspine",
+      "http-request",
+      "sub-workflow",
+      "evidence-chain",
+      "guard-pattern"
+    ]
+  }
+}

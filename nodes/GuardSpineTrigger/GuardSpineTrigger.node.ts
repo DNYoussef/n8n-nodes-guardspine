@@ -5,6 +5,7 @@ import {
   IWebhookResponseData,
   INodeExecutionData,
 } from 'n8n-workflow';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 export class GuardSpineTrigger implements INodeType {
   description: INodeTypeDescription = {
@@ -17,6 +18,12 @@ export class GuardSpineTrigger implements INodeType {
     defaults: { name: 'GuardSpine Trigger' },
     inputs: [],
     outputs: ['main'],
+    credentials: [
+      {
+        name: 'guardSpineApi',
+        required: true,
+      },
+    ],
     webhooks: [
       {
         name: 'default',
@@ -45,6 +52,34 @@ export class GuardSpineTrigger implements INodeType {
   };
 
   async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
+    const credentials = await this.getCredentials('guardSpineApi') as {
+      webhookSecret?: string;
+    };
+    const webhookSecret = credentials.webhookSecret || '';
+
+    // HMAC signature verification (if secret configured)
+    if (webhookSecret) {
+      const req = this.getRequestObject();
+      const signature = req.headers['x-guardspine-signature'] as string | undefined;
+      if (!signature) {
+        return {
+          webhookResponse: JSON.stringify({ error: 'Missing X-GuardSpine-Signature header' }),
+          workflowData: [[]],
+        };
+      }
+
+      const rawBody = JSON.stringify(this.getBodyData());
+      const expected = createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+      const sigBuf = Buffer.from(signature, 'hex');
+      const expBuf = Buffer.from(expected, 'hex');
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        return {
+          webhookResponse: JSON.stringify({ error: 'Invalid signature' }),
+          workflowData: [[]],
+        };
+      }
+    }
+
     const body = this.getBodyData() as {
       event_type?: string;
       timestamp?: string;
@@ -68,6 +103,7 @@ export class GuardSpineTrigger implements INodeType {
         timestamp: body.timestamp || new Date().toISOString(),
         payload: body.payload || body,
         received_at: new Date().toISOString(),
+        signature_verified: !!webhookSecret,
       },
     };
 

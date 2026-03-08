@@ -1,0 +1,361 @@
+{
+  "name": "Governance Approval Flow",
+  "description": "Core governance loop: receives GuardSpine webhook events, checks risk tier via GuardGate, and routes L0-L1 to auto-approve, L2 to evidence seal, L3 to CouncilVote, L4 to human ApprovalWait. Seals every decision into a hash-chained evidence bundle.",
+  "nodes": [
+    {
+      "parameters": {
+        "eventType": "all"
+      },
+      "id": "trigger-webhook",
+      "name": "GuardSpine Trigger",
+      "type": "@guardspine/n8n-nodes-guardspine.guardSpineTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "artifactData": "={{ JSON.stringify($json.payload) }}",
+        "artifactType": "generic",
+        "rubricPack": "nomotic-core",
+        "blockTier": 3,
+        "createBead": true
+      },
+      "id": "risk-check",
+      "name": "GuardGate - Risk Check",
+      "type": "@guardspine/n8n-nodes-guardspine.guardGate",
+      "typeVersion": 1,
+      "position": [
+        350,
+        300
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json._guard.risk_tier }}",
+              "operation": "smallerEqual",
+              "value2": 1
+            }
+          ]
+        }
+      },
+      "id": "tier-router-low",
+      "name": "IF L0-L1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json._guard.risk_tier }}",
+              "operation": "equal",
+              "value2": 2
+            }
+          ]
+        }
+      },
+      "id": "tier-router-mid",
+      "name": "IF L2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        600,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// L0-L1: Auto-approve, pass through\nconst item = $input.first();\nreturn [{\n  json: {\n    ...item.json,\n    _decision: {\n      action: 'auto_approved',\n      reason: 'Risk tier L0-L1 below threshold',\n      decided_at: new Date().toISOString(),\n      approver_id: 'system:auto-approve'\n    }\n  }\n}];"
+      },
+      "id": "auto-approve",
+      "name": "Auto Approve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// L2: Log with evidence, auto-approve with record\nconst item = $input.first();\nreturn [{\n  json: {\n    ...item.json,\n    _decision: {\n      action: 'approved_with_evidence',\n      reason: 'Risk tier L2 -- logged and sealed',\n      decided_at: new Date().toISOString(),\n      approver_id: 'system:evidence-log'\n    }\n  }\n}];"
+      },
+      "id": "log-l2",
+      "name": "Log L2 Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "question": "={{ $json._guard.rubric_pack }}: Should this L3 artifact be approved? Evidence hash: {{ $json._guard.evidence_hash }}",
+        "context": "={{ JSON.stringify($json.payload || {}) }}",
+        "votingMode": "majority",
+        "personaIds": ""
+      },
+      "id": "council-vote-l3",
+      "name": "Council Vote - L3",
+      "type": "@guardspine/n8n-nodes-guardspine.councilVote",
+      "typeVersion": 1,
+      "position": [
+        850,
+        500
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "diffData": "={{ JSON.stringify($json.payload || {}) }}",
+        "riskTier": 4,
+        "guardType": "generic",
+        "timeoutMinutes": 60,
+        "evidenceHash": "={{ $json._guard?.evidence_hash || '' }}",
+        "beadId": "={{ $json._guard?.bead_id || '' }}"
+      },
+      "id": "human-approval-l4",
+      "name": "Approval Gate - L4",
+      "type": "@guardspine/n8n-nodes-guardspine.approvalWait",
+      "typeVersion": 1,
+      "position": [
+        850,
+        700
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "diffHash": "={{ $json._guard?.evidence_hash || $json._council?.evidence_hash || $json._approval?.evidence_hash || '' }}",
+        "approverId": "={{ $json._decision?.approver_id || $json._council?.decision || $json._approval?.approver_id || 'system' }}",
+        "policyRef": "governance-approval-flow-v1",
+        "previousChainHash": "",
+        "metadata": "={{ JSON.stringify({ risk_tier: $json._guard?.risk_tier, action: $json._decision?.action || $json._council?.decision || $json._approval?.action, workflow: 'governance-approval-flow' }) }}"
+      },
+      "id": "seal-decision",
+      "name": "Evidence Seal - Decision",
+      "type": "@guardspine/n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OPENCLAW_BASE_URL || 'http://openclaw.railway.internal:18789'}}/api/v1/callback/governance",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event_id",
+              "value": "={{ $json.event_type || '' }}"
+            },
+            {
+              "name": "evidence_hash",
+              "value": "={{ $json._seal?.chain_hash || '' }}"
+            },
+            {
+              "name": "decision",
+              "value": "={{ $json._decision?.action || $json._council?.decision || $json._approval?.action || 'unknown' }}"
+            }
+          ]
+        }
+      },
+      "id": "callback-openclaw",
+      "name": "POST Result to OpenClaw",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1350,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "GuardSpine Trigger": {
+      "main": [
+        [
+          {
+            "node": "GuardGate - Risk Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GuardGate - Risk Check": {
+      "main": [
+        [
+          {
+            "node": "IF L0-L1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF L2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Council Vote - L3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Approval Gate - L4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF L0-L1": {
+      "main": [
+        [
+          {
+            "node": "Auto Approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF L2": {
+      "main": [
+        [
+          {
+            "node": "Log L2 Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Auto Approve": {
+      "main": [
+        [
+          {
+            "node": "Evidence Seal - Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log L2 Decision": {
+      "main": [
+        [
+          {
+            "node": "Evidence Seal - Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Council Vote - L3": {
+      "main": [
+        [
+          {
+            "node": "Evidence Seal - Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evidence Seal - Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Gate - L4": {
+      "main": [
+        [
+          {
+            "node": "Evidence Seal - Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evidence Seal - Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evidence Seal - Decision": {
+      "main": [
+        [
+          {
+            "node": "POST Result to OpenClaw",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "n8n-guardspine-governance-approval-v1",
+    "created": "2026-03-08T00:00:00Z",
+    "documentationUrl": "https://github.com/DNYoussef/n8n-nodes-guardspine/blob/main/examples/governance-approval-flow.json",
+    "tags": [
+      "governance",
+      "guardspine",
+      "approval",
+      "risk-tiers",
+      "evidence-chain"
+    ]
+  }
+}

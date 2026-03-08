@@ -94,7 +94,22 @@ Orchestrates evaluation across all 24 departments in 7 categories. Fan-out to de
 - KPI and counter-KPI tracking per department
 - Auto-escalation to guard lanes on critical findings
 
-### 7. INDEX.md (this file)
+### 7. guarded-http-request.json
+**Type**: n8n Workflow Definition (JSON)
+**Status**: Template/Example - Sub-Workflow
+
+Reusable sub-workflow that wraps any HTTP request with governance guards. Call this via Execute Workflow instead of using raw HTTP Request nodes.
+
+**Contains**:
+- 7 nodes: trigger, prepare, GuardGate, HTTP Request, merge, EvidenceSeal, blocked response
+- GuardGate evaluates request payload before execution
+- EvidenceSeal logs request/response after execution
+- Block output returns structured error when risk exceeds threshold
+- Input: url, method, headers, body, rubricPack, blockTier, policyRef, approverId
+
+See `GOVERNANCE.md` in the project root for the full guard pattern documentation.
+
+### 8. INDEX.md (this file)
 **Type**: Directory Index
 **Purpose**: Navigation and file overview
 

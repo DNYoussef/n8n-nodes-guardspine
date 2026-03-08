@@ -1,0 +1,311 @@
+{
+  "name": "Outreach Pipeline",
+  "description": "Automated outreach workflow: fetches prospects from outreach DB, gates PII through GuardGate (L2), composes personalized messages, pauses for human batch review via ApprovalWait, sends via webhook, and seals evidence of everything sent.",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0,
+              "daysOfWeek": [
+                "monday"
+              ]
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "manual"
+            }
+          ]
+        }
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.OUTREACH_API_URL || 'http://localhost:8000'}}/api/prospects",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$env.OUTREACH_API_KEY || ''}}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "ready"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        }
+      },
+      "id": "fetch-prospects",
+      "name": "Fetch Prospects",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        350,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "prospects"
+      },
+      "id": "split-prospects",
+      "name": "Split Prospects",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        600,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "artifactData": "={{ JSON.stringify({ email: $json.email, name: $json.name, company: $json.company, lane: $json.lane }) }}",
+        "artifactType": "generic",
+        "rubricPack": "nomotic-core",
+        "blockTier": 3,
+        "createBead": true
+      },
+      "id": "pii-gate",
+      "name": "GuardGate - PII Check",
+      "type": "@guardspine/n8n-nodes-guardspine.guardGate",
+      "typeVersion": 1,
+      "position": [
+        850,
+        400
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Compose personalized outreach message per prospect\nconst prospect = $input.first().json;\nconst lane = prospect.lane || 'dev';\nconst name = prospect.name || 'there';\nconst company = prospect.company || 'your organization';\n\nconst templates = {\n  dev: `Hi ${name},\\n\\nI noticed ${company} ships code fast. We built GuardSpine to add governance without slowing teams down -- a GitHub Action that creates evidence bundles on every PR.\\n\\nWould a 15-min demo be worth your time?\\n\\nBest,\\nDavid`,\n  ciso: `Hi ${name},\\n\\nCompliance teams at companies like ${company} often struggle with audit trails across AI-assisted development. GuardSpine creates tamper-evident evidence bundles automatically.\\n\\nHappy to walk through how it works -- would next week work?\\n\\nBest,\\nDavid`\n};\n\nconst body = templates[lane] || templates.dev;\nconst subject = lane === 'ciso'\n  ? `${company} -- AI governance evidence trails`\n  : `${company} -- ship faster with governance guardrails`;\n\nreturn [{\n  json: {\n    ...prospect,\n    _message: {\n      to: prospect.email,\n      subject,\n      body,\n      lane,\n      composed_at: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "compose-message",
+      "name": "Compose Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "diffData": "={{ JSON.stringify({ batch_size: $items().length, sample_to: $json._message?.to, sample_subject: $json._message?.subject }) }}",
+        "riskTier": 2,
+        "guardType": "generic",
+        "timeoutMinutes": 480,
+        "evidenceHash": "={{ $json._guard?.evidence_hash || '' }}",
+        "beadId": "={{ $json._guard?.bead_id || '' }}"
+      },
+      "id": "batch-approval",
+      "name": "Approval Gate - Review Batch",
+      "type": "@guardspine/n8n-nodes-guardspine.approvalWait",
+      "typeVersion": 1,
+      "position": [
+        1350,
+        400
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EMAIL_WEBHOOK_URL || 'http://localhost:8000/api/send'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$env.EMAIL_API_KEY || ''}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json._message.to, subject: $json._message.subject, body: $json._message.body }) }}"
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1600,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "diffHash": "={{ $json._guard?.evidence_hash || '' }}",
+        "approverId": "={{ $json._approval?.approver_id || 'system:outreach-pipeline' }}",
+        "policyRef": "outreach-pipeline-v1",
+        "previousChainHash": "",
+        "metadata": "={{ JSON.stringify({ to: $json._message?.to, subject: $json._message?.subject, lane: $json._message?.lane, sent_at: new Date().toISOString() }) }}"
+      },
+      "id": "seal-sent",
+      "name": "Evidence Seal - Sent Record",
+      "type": "@guardspine/n8n-nodes-guardspine.evidenceSeal",
+      "typeVersion": 1,
+      "position": [
+        1850,
+        400
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Prospects": {
+      "main": [
+        [
+          {
+            "node": "Split Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Prospects": {
+      "main": [
+        [
+          {
+            "node": "GuardGate - PII Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GuardGate - PII Check": {
+      "main": [
+        [
+          {
+            "node": "Compose Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Compose Message": {
+      "main": [
+        [
+          {
+            "node": "Approval Gate - Review Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Gate - Review Batch": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Evidence Seal - Sent Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "n8n-guardspine-outreach-pipeline-v1",
+    "created": "2026-03-08T00:00:00Z",
+    "documentationUrl": "https://github.com/DNYoussef/n8n-nodes-guardspine/blob/main/examples/outreach-pipeline.json",
+    "tags": [
+      "outreach",
+      "guardspine",
+      "pii-guard",
+      "approval",
+      "evidence-chain"
+    ]
+  }
+}

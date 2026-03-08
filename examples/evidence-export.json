@@ -1,0 +1,279 @@
+{
+  "name": "Evidence Export",
+  "description": "Daily scheduled export of GuardSpine evidence bundles. Fetches bundles via API, gates the export through GuardGate (L1), stores the archive, and sends a Slack notification with summary.",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.GUARDSPINE_API_URL || 'http://localhost:3000'}}/api/bundles/export",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$env.GUARDSPINE_API_KEY || ''}}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ new Date(Date.now() - 86400000).toISOString() }}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "id": "fetch-bundles",
+      "name": "Fetch Evidence Bundles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        350,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ ($json.bundles || []).length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-bundles",
+      "name": "Has Bundles?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "artifactData": "={{ JSON.stringify({ bundle_count: ($json.bundles || []).length, export_date: new Date().toISOString(), action: 'evidence_export' }) }}",
+        "artifactType": "generic",
+        "rubricPack": "nomotic-core",
+        "blockTier": 2,
+        "createBead": true
+      },
+      "id": "export-gate",
+      "name": "GuardGate - Export Check",
+      "type": "@guardspine/n8n-nodes-guardspine.guardGate",
+      "typeVersion": 1,
+      "position": [
+        850,
+        250
+      ],
+      "credentials": {
+        "guardSpineApi": "GuardSpine API"
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{$env.ARCHIVE_API_URL || 'http://localhost:8000'}}/api/evidence/archive",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$env.ARCHIVE_API_KEY || ''}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ bundles: $json.bundles, exported_at: new Date().toISOString(), evidence_hash: $json._guard?.evidence_hash || '' }) }}"
+      },
+      "id": "store-archive",
+      "name": "Store Archive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build Slack notification payload\nconst bundles = $input.first().json.bundles || [];\nconst bundleCount = bundles.length;\nconst evidenceHash = $input.first().json._guard?.evidence_hash || 'n/a';\nconst riskTiers = {};\nfor (const b of bundles) {\n  const tier = `L${b.risk_tier || 0}`;\n  riskTiers[tier] = (riskTiers[tier] || 0) + 1;\n}\nconst tierSummary = Object.entries(riskTiers)\n  .map(([t, c]) => `${t}: ${c}`)\n  .join(', ') || 'none';\n\nconst text = [\n  `*Daily Evidence Export Complete*`,\n  `Bundles exported: ${bundleCount}`,\n  `Risk tier breakdown: ${tierSummary}`,\n  `Evidence hash: \\`${evidenceHash}\\``,\n  `Export time: ${new Date().toISOString()}`\n].join('\\n');\n\nreturn [{ json: { text, channel: $env.SLACK_CHANNEL || '#guardspine-ops' } }];"
+      },
+      "id": "build-slack-msg",
+      "name": "Build Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/PLACEHOLDER'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text, channel: $json.channel }) }}"
+      },
+      "id": "slack-notify",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1600,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// No bundles to export today\nreturn [{\n  json: {\n    status: 'skipped',\n    reason: 'No evidence bundles in the last 24 hours',\n    checked_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "no-bundles",
+      "name": "No Bundles - Skip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        450
+      ]
+    }
+  ],
+  "connections": {
+    "Daily Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Evidence Bundles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Evidence Bundles": {
+      "main": [
+        [
+          {
+            "node": "Has Bundles?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Bundles?": {
+      "main": [
+        [
+          {
+            "node": "GuardGate - Export Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Bundles - Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GuardGate - Export Check": {
+      "main": [
+        [
+          {
+            "node": "Store Archive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Store Archive": {
+      "main": [
+        [
+          {
+            "node": "Build Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "n8n-guardspine-evidence-export-v1",
+    "created": "2026-03-08T00:00:00Z",
+    "documentationUrl": "https://github.com/DNYoussef/n8n-nodes-guardspine/blob/main/examples/evidence-export.json",
+    "tags": [
+      "evidence",
+      "guardspine",
+      "export",
+      "compliance",
+      "slack"
+    ]
+  }
+}

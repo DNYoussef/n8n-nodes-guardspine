@@ -7,7 +7,7 @@ import {
 export class GuardSpineApi implements ICredentialType {
   name = 'guardSpineApi';
   displayName = 'GuardSpine API';
-  documentationUrl = 'https://github.com/DNYoussef/life-os-dashboard';
+  documentationUrl = 'https://github.com/DNYoussef/n8n-nodes-guardspine';
   properties: INodeProperties[] = [
     {
       displayName: 'Base URL',
@@ -24,6 +24,14 @@ export class GuardSpineApi implements ICredentialType {
       typeOptions: { password: true },
       default: '',
       description: 'GuardSpine API key from GUARDSPINE_API_KEY env var',
+    },
+    {
+      displayName: 'Webhook Secret',
+      name: 'webhookSecret',
+      type: 'string',
+      typeOptions: { password: true },
+      default: '',
+      description: 'HMAC-SHA256 secret for verifying inbound webhook signatures (X-GuardSpine-Signature header)',
     },
   ];
 
