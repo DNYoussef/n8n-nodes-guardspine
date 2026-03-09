@@ -93,7 +93,7 @@ export function setupGuardSpineMocks(opts: {
 } = {}): void {
   nock.cleanAll();
 
-  const scope = nock(GUARDSPINE_BASE)
+  nock(GUARDSPINE_BASE)
     .persist()
     // Health check
     .get('/health')

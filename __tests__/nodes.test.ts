@@ -33,7 +33,7 @@ function makeFakeContext(overrides: {
 	const httpResponse = overrides.httpResponse || {};
 	const inputData = overrides.inputData || [{ json: {} }];
 
-	let lastHttpRequest: any = null;
+	const lastHttpRequest: any = null;
 
 	return {
 		getCredentials: jest.fn().mockResolvedValue(creds),

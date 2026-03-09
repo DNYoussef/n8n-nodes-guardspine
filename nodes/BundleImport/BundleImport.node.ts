@@ -3,7 +3,6 @@ import {
   INodeExecutionData,
   INodeType,
   INodeTypeDescription,
-  NodeOperationError,
 } from 'n8n-workflow';
 
 import type { BundleImportResponse } from '../types';
