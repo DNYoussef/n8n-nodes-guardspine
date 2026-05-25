@@ -291,4 +291,4 @@ Before importing:
 
 **Created**: 2026-01-27
 **Status**: Ready for Use
-**License**: MIT (or as specified by GuardSpine project)
+**License**: Apache-2.0

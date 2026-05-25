@@ -2,7 +2,7 @@
   "name": "n8n-nodes-guardspine",
   "version": "0.1.0",
   "description": "n8n nodes for GuardSpine governance layer",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "David Youssef",
   "keywords": [
     "n8n",

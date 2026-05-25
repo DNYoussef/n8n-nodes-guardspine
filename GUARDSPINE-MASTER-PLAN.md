@@ -70,7 +70,7 @@ GuardSpine is entropy control for AI-accelerated production. It turns every chan
 |------|------|--------|---------|
 | GuardSpine (Backend) | `D:\Projects\GuardSpine` | 149 routes, 144 tests | Proprietary |
 | guardspine-product | `D:\Projects\guardspine-product` | v1.0.0, 11 guard lanes | Proprietary |
-| n8n-nodes-guardspine | `D:\Projects\n8n-nodes-guardspine` | 7 nodes, 113 tests | MIT |
+| n8n-nodes-guardspine | `D:\Projects\n8n-nodes-guardspine` | 7 nodes, 113 tests | Apache-2.0 |
 | guardspine-spec | `D:\Projects\GuardSpine\open-source\guardspine-spec` | v1.0.0 | Apache 2.0 |
 | guardspine-verify | `D:\Projects\GuardSpine\open-source\guardspine-verify` | v0.1.0 | Apache 2.0 |
 | guardspine-connector-template | `D:\Projects\GuardSpine\open-source\guardspine-connector-template` | v1.0.0 | Apache 2.0 |
