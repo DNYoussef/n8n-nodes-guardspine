@@ -7,6 +7,22 @@ import {
 } from 'n8n-workflow';
 import { createHmac, timingSafeEqual } from 'crypto';
 
+function canonicalJson(value: unknown): string {
+  if (value === undefined) {
+    return 'null';
+  }
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(obj[key])}`
+  )).join(',')}}`;
+}
+
 export class GuardSpineTrigger implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'GuardSpine Trigger',
@@ -57,27 +73,37 @@ export class GuardSpineTrigger implements INodeType {
     };
     const webhookSecret = credentials.webhookSecret || '';
 
-    // HMAC signature verification (if secret configured)
-    if (webhookSecret) {
-      const req = this.getRequestObject();
-      const signature = req.headers['x-guardspine-signature'] as string | undefined;
-      if (!signature) {
-        return {
-          webhookResponse: JSON.stringify({ error: 'Missing X-GuardSpine-Signature header' }),
-          workflowData: [[]],
-        };
-      }
+    // HMAC signature verification is mandatory. Unsigned event webhooks are
+    // indistinguishable from direct internet calls to the n8n public URL.
+    if (!webhookSecret) {
+      return {
+        webhookResponse: JSON.stringify({ error: 'GuardSpine Webhook Secret is required' }),
+        workflowData: [[]],
+      };
+    }
 
-      const rawBody = JSON.stringify(this.getBodyData());
-      const expected = createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
-      const sigBuf = Buffer.from(signature, 'hex');
-      const expBuf = Buffer.from(expected, 'hex');
-      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-        return {
-          webhookResponse: JSON.stringify({ error: 'Invalid signature' }),
-          workflowData: [[]],
-        };
-      }
+    const req = this.getRequestObject();
+    const signatureHeader = req.headers['x-guardspine-signature'] as string | undefined;
+    if (!signatureHeader) {
+      return {
+        webhookResponse: JSON.stringify({ error: 'Missing X-GuardSpine-Signature header' }),
+        workflowData: [[]],
+      };
+    }
+
+    const signature = signatureHeader.startsWith('sha256=')
+      ? signatureHeader.slice('sha256='.length)
+      : signatureHeader;
+    const expected = createHmac('sha256', webhookSecret)
+      .update(canonicalJson(this.getBodyData()))
+      .digest('hex');
+    const sigBuf = Buffer.from(signature, 'hex');
+    const expBuf = Buffer.from(expected, 'hex');
+    if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+      return {
+        webhookResponse: JSON.stringify({ error: 'Invalid signature' }),
+        workflowData: [[]],
+      };
     }
 
     const body = this.getBodyData() as {
@@ -103,7 +129,7 @@ export class GuardSpineTrigger implements INodeType {
         timestamp: body.timestamp || new Date().toISOString(),
         payload: body.payload || body,
         received_at: new Date().toISOString(),
-        signature_verified: !!webhookSecret,
+        signature_verified: true,
       },
     };
 

@@ -7,6 +7,7 @@
  */
 
 import { ApprovalWait } from '../nodes/ApprovalWait/ApprovalWait.node';
+import { createHmac } from 'crypto';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -22,6 +23,7 @@ function makeExecuteContext(overrides: {
 	const creds = overrides.credentials || {
 		baseUrl: 'http://localhost:8000',
 		apiKey: 'test-key',
+		webhookSecret: 'test-secret',
 	};
 	const httpResponse = overrides.httpResponse || {};
 
@@ -42,9 +44,38 @@ function makeExecuteContext(overrides: {
 	};
 }
 
-function makeWebhookContext(body: Record<string, any>) {
+function canonicalJson(value: unknown): string {
+	if (value === undefined) {
+		return 'null';
+	}
+	if (value === null || typeof value !== 'object') {
+		return JSON.stringify(value) ?? 'null';
+	}
+	if (Array.isArray(value)) {
+		return `[${value.map(canonicalJson).join(',')}]`;
+	}
+	const obj = value as Record<string, unknown>;
+	return `{${Object.keys(obj).sort().map((key) => (
+		`${JSON.stringify(key)}:${canonicalJson(obj[key])}`
+	)).join(',')}}`;
+}
+
+function signBody(body: Record<string, any>, secret = 'test-secret'): string {
+	return createHmac('sha256', secret).update(canonicalJson(body)).digest('hex');
+}
+
+function makeWebhookContext(
+	body: Record<string, any>,
+	overrides: { secret?: string; signature?: string | null } = {},
+) {
+	const secret = overrides.secret ?? 'test-secret';
+	const signature = overrides.signature === undefined ? signBody(body, secret) : overrides.signature;
 	return {
+		getCredentials: jest.fn().mockResolvedValue({ webhookSecret: secret }),
 		getBodyData: jest.fn(() => body),
+		getRequestObject: jest.fn(() => ({
+			headers: signature ? { 'x-guardspine-signature': signature } : {},
+		})),
 	};
 }
 
@@ -85,6 +116,7 @@ describe('ApprovalWait execute', () => {
 		expect(body.diff_data).toEqual({ before: 'a', after: 'b' });
 		expect(body.workflow_execution_id).toBe('exec-456');
 		expect(body.idempotency_key).toBe('exec-456-node-abc');
+		expect(body.resume_webhook_secret).toBe('test-secret');
 	});
 
 	test('includes webhook URL in request body', async () => {
@@ -161,6 +193,20 @@ describe('ApprovalWait execute', () => {
 		await node.execute.call(ctx as any);
 		const body = ctx.helpers.httpRequest.mock.calls[0][0].body;
 		expect(body.resume_webhook_url).toBe('http://localhost:8000/webhook-waiting/approval-callback');
+	});
+
+	test('throws when webhook secret is missing', async () => {
+		const ctx = makeExecuteContext({
+			params: defaultParams,
+			credentials: {
+				baseUrl: 'http://localhost:8000',
+				apiKey: 'test-key',
+			},
+		});
+		const node = new ApprovalWait();
+		await expect(node.execute.call(ctx as any)).rejects.toThrow(
+			'GuardSpine Webhook Secret is required',
+		);
 	});
 });
 
@@ -276,5 +322,27 @@ describe('ApprovalWait webhook', () => {
 		const item = result.workflowData![0][0].json as any;
 		expect(() => new Date(item.decided_at)).not.toThrow();
 		expect(new Date(item.decided_at).getFullYear()).toBeGreaterThanOrEqual(2025);
+	});
+
+	test('rejects missing signature', async () => {
+		const ctx = makeWebhookContext({
+			decision: 'approved',
+			decided_by: 'user-1',
+		}, { signature: null });
+		const node = new ApprovalWait();
+		const result = await node.webhook.call(ctx as any);
+		expect(result.webhookResponse).toContain('Invalid GuardSpine approval signature');
+		expect(result.workflowData).toEqual([[], []]);
+	});
+
+	test('rejects invalid signature', async () => {
+		const ctx = makeWebhookContext({
+			decision: 'approved',
+			decided_by: 'user-1',
+		}, { signature: '00' });
+		const node = new ApprovalWait();
+		const result = await node.webhook.call(ctx as any);
+		expect(result.webhookResponse).toContain('Invalid GuardSpine approval signature');
+		expect(result.workflowData).toEqual([[], []]);
 	});
 });

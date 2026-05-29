@@ -6,18 +6,49 @@
  */
 
 import { GuardSpineTrigger } from '../nodes/GuardSpineTrigger/GuardSpineTrigger.node';
+import { createHmac } from 'crypto';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
-function makeWebhookContext(body: Record<string, any>, eventTypeParam: string = 'all') {
+function canonicalJson(value: unknown): string {
+  if (value === undefined) {
+    return 'null';
+  }
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(obj[key])}`
+  )).join(',')}}`;
+}
+
+function signBody(body: Record<string, any>, secret = 'test-secret'): string {
+  return createHmac('sha256', secret).update(canonicalJson(body)).digest('hex');
+}
+
+function makeWebhookContext(
+  body: Record<string, any>,
+  eventTypeParam: string = 'all',
+  overrides: { secret?: string; signature?: string | null } = {},
+) {
+  const secret = overrides.secret ?? 'test-secret';
+  const signature = overrides.signature === undefined ? signBody(body, secret) : overrides.signature;
   return {
+    getCredentials: jest.fn().mockResolvedValue({ webhookSecret: secret }),
     getBodyData: jest.fn(() => body),
     getNodeParameter: jest.fn((name: string) => {
       if (name === 'eventType') return eventTypeParam;
       return '';
     }),
+    getRequestObject: jest.fn(() => ({
+      headers: signature ? { 'x-guardspine-signature': signature } : {},
+    })),
   };
 }
 
@@ -79,6 +110,7 @@ describe('GuardSpineTrigger webhook', () => {
     expect(item.event_type).toBe('risk_alert');
     expect(item.payload.risk_tier).toBe(3);
     expect(item.received_at).toBeTruthy();
+    expect(item.signature_verified).toBe(true);
   });
 
   test('accepts matching event type', async () => {
@@ -139,5 +171,51 @@ describe('GuardSpineTrigger webhook', () => {
     const item = result.workflowData![0][0].json as any;
     expect(item.timestamp).toBeTruthy();
     expect(() => new Date(item.timestamp)).not.toThrow();
+  });
+
+  test('accepts sha256-prefixed signatures', async () => {
+    const body = { event_type: 'risk_alert', payload: { risk_tier: 3 } };
+    const ctx = makeWebhookContext(body, 'all', {
+      signature: `sha256=${signBody(body)}`,
+    });
+
+    const node = new GuardSpineTrigger();
+    const result = await node.webhook.call(ctx as any);
+
+    expect(result.webhookResponse).toBe('OK');
+    expect(result.workflowData![0].length).toBe(1);
+  });
+
+  test('rejects missing webhook secret', async () => {
+    const body = { event_type: 'risk_alert', payload: {} };
+    const ctx = makeWebhookContext(body, 'all', { secret: '' });
+
+    const node = new GuardSpineTrigger();
+    const result = await node.webhook.call(ctx as any);
+
+    expect(result.webhookResponse).toContain('Webhook Secret is required');
+    expect(result.workflowData![0].length).toBe(0);
+  });
+
+  test('rejects missing signature', async () => {
+    const body = { event_type: 'risk_alert', payload: {} };
+    const ctx = makeWebhookContext(body, 'all', { signature: null });
+
+    const node = new GuardSpineTrigger();
+    const result = await node.webhook.call(ctx as any);
+
+    expect(result.webhookResponse).toContain('Missing X-GuardSpine-Signature');
+    expect(result.workflowData![0].length).toBe(0);
+  });
+
+  test('rejects invalid signature', async () => {
+    const body = { event_type: 'risk_alert', payload: {} };
+    const ctx = makeWebhookContext(body, 'all', { signature: '00' });
+
+    const node = new GuardSpineTrigger();
+    const result = await node.webhook.call(ctx as any);
+
+    expect(result.webhookResponse).toContain('Invalid signature');
+    expect(result.workflowData![0].length).toBe(0);
   });
 });

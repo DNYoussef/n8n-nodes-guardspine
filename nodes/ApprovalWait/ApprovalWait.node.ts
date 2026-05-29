@@ -7,6 +7,36 @@ import {
   IWebhookResponseData,
   NodeOperationError,
 } from 'n8n-workflow';
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function canonicalJson(value: unknown): string {
+  if (value === undefined) {
+    return 'null';
+  }
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(obj[key])}`
+  )).join(',')}}`;
+}
+
+function verifySignature(body: unknown, signature: string | undefined, secret: string): boolean {
+  if (!signature) {
+    return false;
+  }
+  const normalizedSignature = signature.startsWith('sha256=')
+    ? signature.slice('sha256='.length)
+    : signature;
+  const expected = createHmac('sha256', secret).update(canonicalJson(body)).digest('hex');
+  const sigBuf = Buffer.from(normalizedSignature, 'hex');
+  const expBuf = Buffer.from(expected, 'hex');
+  return sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf);
+}
 
 export class ApprovalWait implements INodeType {
   description: INodeTypeDescription = {
@@ -89,7 +119,14 @@ export class ApprovalWait implements INodeType {
     const credentials = await this.getCredentials('guardSpineApi') as {
       baseUrl: string;
       apiKey: string;
+      webhookSecret?: string;
     };
+    if (!credentials.webhookSecret) {
+      throw new NodeOperationError(
+        this.getNode(),
+        'GuardSpine Webhook Secret is required for approval callbacks',
+      );
+    }
 
     const diffData = this.getNodeParameter('diffData', 0);
     const riskTier = this.getNodeParameter('riskTier', 0) as number;
@@ -129,6 +166,7 @@ export class ApprovalWait implements INodeType {
         },
         body: {
           resume_webhook_url: baseWebhookUrl,
+          resume_webhook_secret: credentials.webhookSecret,
           diff_data: parsedDiffData,
           risk_tier: riskTier,
           guard_type: guardType,
@@ -153,11 +191,22 @@ export class ApprovalWait implements INodeType {
   }
 
   async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
+    const credentials = await this.getCredentials('guardSpineApi') as {
+      webhookSecret?: string;
+    };
     const body = this.getBodyData() as {
       decision: string;
       decided_by: string;
       reason?: string;
     };
+    const webhookSecret = credentials.webhookSecret || '';
+    const signature = this.getRequestObject().headers['x-guardspine-signature'] as string | undefined;
+    if (!webhookSecret || !verifySignature(body, signature, webhookSecret)) {
+      return {
+        webhookResponse: JSON.stringify({ error: 'Invalid GuardSpine approval signature' }),
+        workflowData: [[], []],
+      };
+    }
 
     const outputItem: INodeExecutionData = {
       json: {
